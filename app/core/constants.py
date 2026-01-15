@@ -275,3 +275,29 @@ TASK_TYPES: dict[SubCategory, list[tuple[str, TaskPriority]]] = {
         ("Permanent Email Suppression", TaskPriority.LOW),
     ],
 }
+
+
+# Category-specific MS Teams notification messages
+# Per Requirements.md section 3.3.2: 7 specific notification messages
+NOTIFICATION_MESSAGES: dict[SubCategory, str] = {
+    # Interested - action required messages
+    SubCategory.READY_TO_CHAT_PHONE: "Action required, lead ready to chat",
+    SubCategory.READY_TO_CHAT_OPEN: "Action required, lead ready to chat",
+    SubCategory.INTRIGUED: "Action required, intrigued lead",
+    SubCategory.CONNECT_WITH_ANOTHER: "Action required, internal handoff",
+    SubCategory.MISUNDERSTOOD_INTERESTED: "Clarify misunderstanding",
+    SubCategory.LONG_TERM_FOLLOWUP: "Action required, interested lead",
+    SubCategory.PROSPECT_PITCHING: "Action required, interested lead",
+    # Positive Signals - urgent signals
+    SubCategory.REFERRAL: "Action required, lead referred other contact",
+    SubCategory.COMPETITOR_MENTION: "Urgent positive signal",
+    SubCategory.BUDGET_CONFIRMED: "Urgent positive signal",
+    SubCategory.AUTHORITY_CONFIRMED: "Urgent positive signal",
+    # Negative signals that need attention (for completeness)
+    SubCategory.MISUNDERSTOOD_NOT_INTERESTED: "Clarify misunderstanding",
+}
+
+
+def get_notification_message(subcategory: SubCategory) -> str | None:
+    """Get the notification message for a subcategory, or None if no special message."""
+    return NOTIFICATION_MESSAGES.get(subcategory)

@@ -1,6 +1,6 @@
 """MS Teams notification service."""
 
-from app.core.constants import TaskPriority
+from app.core.constants import SubCategory, TaskPriority, get_notification_message
 from app.core.exceptions import NotificationError
 from app.core.logging import get_logger
 from app.db.models.contact import Contact
@@ -56,6 +56,17 @@ class NotificationService:
                 )
                 return None
 
+            # Get category-specific notification message (Requirements.md 3.3.2)
+            # Use subcategory for more specific messages, fallback to category
+            category_message = None
+            subcategory_value = task.subcategory or task.category
+            if subcategory_value:
+                try:
+                    subcategory = SubCategory(subcategory_value)
+                    category_message = get_notification_message(subcategory)
+                except ValueError:
+                    pass  # Invalid category, skip custom message
+
             # Build notification content
             content = NotificationContent(
                 title=f"[ACTION REQUIRED] {task.title}",
@@ -68,6 +79,7 @@ class NotificationService:
                 hubspot_task_url=hubspot_task_url,
                 draft_message=draft_message,
                 meeting_agenda=meeting_agenda,
+                category_message=category_message,
             )
 
             # Format and send

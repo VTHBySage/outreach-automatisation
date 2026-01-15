@@ -201,6 +201,19 @@ Built a HubSpot Notes module for adding notes to contact records:
 
 Uses HubSpot's CRM v3 notes API with v4 associations for linking notes to contacts. Useful for audit trails and manual annotations.
 
+### Custom Property Management (Requirements.md 4.2.2)
+Added methods for managing custom contact properties in HubSpot:
+- **Get property**: `get_property(property_name)` - Get property definition, returns None if not found
+- **Create property**: `create_property(name, label, property_type, field_type, group_name, description, options)` - Create new custom property
+- **Update property**: `update_property(property_name, label, description, options)` - Update existing property
+- **Get all properties**: `get_all_properties()` - List all contact properties
+- **Ensure property exists**: `ensure_property_exists(name, label, ...)` - Idempotent property setup (creates if missing)
+
+Supports property types: `string`, `number`, `date`, `datetime`, `enumeration`
+Supports field types: `text`, `textarea`, `date`, `file`, `number`, `select`, `radio`, `checkbox`
+
+Used for programmatic setup of custom fields like `validation_status`, `current_channel`, etc.
+
 ### Meeting Scheduling
 Built meeting scheduling integration for booking calls with interested leads:
 - **Get meeting link**: Retrieves personalized meeting links for HubSpot owners
@@ -217,7 +230,21 @@ Used by task generation to include meeting links in high-priority task notificat
 
 Built notification system that alerts the team about high-priority tasks. Only Highest and High priority tasks trigger notifications - Medium and Low are handled through HubSpot task queue.
 
+### Category-Specific Notification Messages
+Per Requirements.md 3.3.2, notifications now include category-specific banner messages:
+
+| Subcategory | Notification Message |
+|-------------|---------------------|
+| Ready to Chat (1.1, 1.3) | "ACTION REQUIRED, LEAD READY TO CHAT" |
+| Intrigued (1.2) | "ACTION REQUIRED, INTRIGUED LEAD" |
+| Connect with Another (1.4) | "ACTION REQUIRED, INTERNAL HANDOFF" |
+| Misunderstood (1.5, 3.4) | "CLARIFY MISUNDERSTANDING" |
+| Long-term/Pitching (1.6, 1.7) | "ACTION REQUIRED, INTERESTED LEAD" |
+| Referral (2.1) | "ACTION REQUIRED, LEAD REFERRED OTHER CONTACT" |
+| Budget/Authority/Competitor (2.2-2.4) | "URGENT POSITIVE SIGNAL" |
+
 Notifications are sent as Adaptive Cards containing:
+- **Category message banner** (prominent, color-coded by priority)
 - Action required header with category
 - Lead name, company, email, and phone number
 - Task description and priority level
@@ -369,29 +396,57 @@ All channel switches respect the human approval requirement:
 
 ---
 
-## Lead Validation
+## Lead Validation (LLM Company Validation)
 
-Built AI-powered company validation for campaign setup using **API-based enrichment** (not website crawling). When validating leads against campaign criteria, the system:
+Built comprehensive AI-powered company validation with configurable campaign targeting criteria.
 
-1. Takes company name and domain
-2. Fetches company data from **Apollo.io API** (description, industry, employee count, funding)
-3. Sends enriched data to OpenAI with campaign criteria (target company types, industries, exclusions, size ranges)
-4. Returns whether the company matches with confidence score
+### Campaign Model
+Created `Campaign` model for storing target criteria per campaign:
+- **Target types**: Array of company types to include (e.g., `["hotel_chain", "resort", "boutique_hotel"]`)
+- **Target industries**: Array of industries to target (e.g., `["hospitality", "travel"]`)
+- **Exclude types**: Company types to exclude (e.g., `["airbnb", "vacation_rental"]`)
+- **Employee size filters**: `min_employees` and `max_employees`
+- **Confidence thresholds**:
+  - `min_confidence` (default 0.85) - Auto-approve threshold
+  - `review_threshold` (default 0.75) - Manual review range
 
-**Why API enrichment instead of crawling:**
-- Apollo provides pre-structured, verified company data
-- Faster than scraping (single API call vs. parsing HTML)
-- More reliable data quality and format consistency
-- Avoids legal/ToS issues with website scraping
-- LinkedIn data available through Apollo's aggregated sources
+### Validation Flow
+```
+Lead → Homepage Crawl → Apollo Enrichment → LLM Analysis → Classification → Campaign Eligibility
+```
+
+1. **Homepage Crawling** (fast mode): Fetches homepage only for speed
+   - Extracts title, meta description, keywords
+   - Extracts services, social links, contact info
+   - Uses homepage text as about content
+
+2. **Apollo Enrichment** (optional): Fetches company data from Apollo API
+   - Industry, employee count, description
+   - Keywords, founding year, revenue
+
+3. **LLM Classification**: GPT-4o analyzes combined data against campaign criteria
+   - Returns: `is_match`, `confidence`, `company_type`, `reasoning`
+
+### Validation Service
+`CompanyValidationService` in `app/services/validation/`:
+- `validate_company(company_name, company_domain, campaign)` - Single company validation
+- `validate_contact(contact_id, campaign_id)` - Validates and updates contact record
+- `batch_validate_contacts(campaign_id, limit)` - Batch validation for campaign
+
+### Validation Tasks
+Celery tasks in `app/workers/validation_tasks.py`:
+- `validate_contact_company` - Single contact validation
+- `batch_validate_campaign` - Batch validation for campaign
+- `validate_all_campaigns` - Hourly job processing all active campaigns
 
 | Confidence | Action |
 |------------|--------|
-| 85%+ | Automatically included |
-| 75-85% | Flagged for manual review |
-| Below 75% | Rejected |
+| 85%+ | Automatically validated (`VALIDATED`) |
+| 75-85% | Flagged for manual review (`PENDING`) |
+| Below 75% | Rejected (`REJECTED`) |
 
-The validation result includes company type classification and reasoning, stored on the contact record.
+### Database
+New `campaigns` table with FK from `contacts.campaign_id`. Migration: `003_add_campaigns_table.py`
 
 ---
 
@@ -972,6 +1027,10 @@ All requirement gaps have been implemented:
 | 12 | SmartLead Mailbox Monitoring | ✅ Complete | `get_warmup_status()`, `get_throttle_status()`, `get_master_inbox()` |
 | 13 | HubSpot Notes | ✅ Complete | `app/integrations/hubspot/notes.py` |
 | 14 | Channel Switching | ✅ Complete | `app/services/channel_switching/` + Celery task |
+| 15 | Campaign Model | ✅ Complete | `app/db/models/campaign.py` + migration |
+| 16 | LLM Company Validation | ✅ Complete | `app/services/validation/service.py` + Celery tasks |
+| 17 | Category-Specific Notifications | ✅ Complete | `NOTIFICATION_MESSAGES` in constants.py |
+| 18 | HubSpot Custom Properties | ✅ Complete | Property management methods in contacts.py |
 
 ### Files Created
 - `app/integrations/webcrawler/__init__.py`
@@ -988,6 +1047,11 @@ All requirement gaps have been implemented:
 - `app/db/migrations/versions/002_add_channel_switching_fields.py` - Migration for channel fields
 - `tests.md` - Comprehensive test scenarios (192 tests)
 - `tests_refined.md` - Human-readable test documentation
+- `app/db/models/campaign.py` - Campaign model for LLM company validation
+- `app/db/migrations/versions/003_add_campaigns_table.py` - Migration for campaigns table
+- `app/services/validation/__init__.py` - Validation service package
+- `app/services/validation/service.py` - LLM company validation service
+- `app/workers/validation_tasks.py` - Company validation Celery tasks
 
 ### Files Modified
 - `app/api/v1/dashboard.py` - Added email metrics endpoint
@@ -997,17 +1061,22 @@ All requirement gaps have been implemented:
 - `app/config.py` - Added HeyReach and log rotation settings
 - `app/core/logging.py` - Added file rotation handler
 - `app/core/metrics.py` - Added 13 new Prometheus metrics
+- `app/core/constants.py` - Added `NOTIFICATION_MESSAGES` dict and `get_notification_message()` helper
 - `app/db/repositories/contact.py` - Added `get_by_linkedin_url()`
 - `app/db/session.py` - Added SQLAlchemy event listeners
-- `app/db/models/contact.py` - Added channel switching fields (current_channel, channel_switched_at, last_engagement_at)
+- `app/db/models/contact.py` - Added channel switching fields + campaign FK relationship
 - `app/integrations/base.py` - Added integration name tracking
 - `app/integrations/apollo/client.py` - Added integration name + email validation methods
 - `app/integrations/connectsafely/client.py` - Added integration name
 - `app/integrations/hubspot/client.py` - Added integration name
 - `app/integrations/hubspot/__init__.py` - Export HubSpotNotes
+- `app/integrations/hubspot/contacts.py` - Added custom property management methods
 - `app/integrations/smartlead/client.py` - Added integration name + mailbox management methods
+- `app/integrations/webcrawler/client.py` - Added `fetch_homepage_only()` for fast validation
 - `app/services/categorization/prompts.py` - Added timing/referral fields
 - `app/services/categorization/service.py` - Added web/LinkedIn enrichment
+- `app/services/notifications/formatter.py` - Added `category_message` field to NotificationContent
+- `app/services/notifications/service.py` - Added category-specific message lookup
 - `app/workers/categorization_tasks.py` - Added timing/referral handling
 - `app/workers/webhook_tasks.py` - Added HeyReach task + engagement metrics
-- `app/workers/celery_app.py` - Added channel_tasks to autodiscover + beat schedule
+- `app/workers/celery_app.py` - Added validation tasks routes, autodiscover, and beat schedule

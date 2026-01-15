@@ -4,12 +4,17 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Index, String, Text
+from typing import TYPE_CHECKING
+
+from sqlalchemy import ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import LeadSource, ValidationStatus
 from app.db.base import Base, SoftDeleteMixin, TimestampMixin, UUIDMixin
+
+if TYPE_CHECKING:
+    from app.db.models.campaign import Campaign
 
 
 class Contact(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
@@ -39,7 +44,17 @@ class Contact(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     validation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Campaign tracking
-    campaign_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), index=True, nullable=True)
+    campaign_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("campaigns.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    campaign: Mapped["Campaign | None"] = relationship(
+        "Campaign",
+        back_populates="contacts",
+        foreign_keys=[campaign_id],
+    )
     source: Mapped[str] = mapped_column(
         String(50),
         default=LeadSource.MANUAL.value,

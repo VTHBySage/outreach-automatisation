@@ -38,6 +38,7 @@ celery_app.conf.update(
         "app.workers.scheduler_tasks.*": {"queue": "scheduler"},
         "app.workers.linkedin_tasks.*": {"queue": "linkedin"},
         "app.workers.channel_tasks.*": {"queue": "scheduler"},  # Channel switching uses scheduler queue
+        "app.workers.validation_tasks.*": {"queue": "validation"},  # Company validation queue
     },
     # Default queue
     task_default_queue="default",
@@ -57,6 +58,7 @@ celery_app.autodiscover_tasks(
         "app.workers.scheduler_tasks",
         "app.workers.linkedin_tasks",
         "app.workers.channel_tasks",
+        "app.workers.validation_tasks",
     ]
 )
 
@@ -87,5 +89,10 @@ celery_app.conf.beat_schedule = {
     "daily-channel-switching": {
         "task": "app.workers.channel_tasks.process_channel_switches",
         "schedule": crontab(hour=10, minute=0),  # 10 AM daily
+    },
+    "hourly-company-validation": {
+        "task": "app.workers.validation_tasks.validate_all_campaigns",
+        "schedule": crontab(minute=30),  # Every hour at :30
+        "args": (25,),  # Validate up to 25 contacts per campaign per hour
     },
 }

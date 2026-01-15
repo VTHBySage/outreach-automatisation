@@ -209,6 +209,78 @@ class WebCrawlerClient:
 
         return list(services)[:20]  # Limit to 20 services
 
+    async def fetch_homepage_only(self, domain: str) -> CompanyWebInfo:
+        """
+        Fetch only the homepage for fast validation (no additional pages).
+
+        This is the optimized method for LLM company validation when speed
+        is prioritized over comprehensive data collection.
+
+        Args:
+            domain: Company domain (e.g., "example.com")
+
+        Returns:
+            CompanyWebInfo with homepage-only data
+        """
+        # Normalize domain
+        if not domain.startswith("http"):
+            base_url = f"https://{domain}"
+        else:
+            base_url = domain
+            domain = urlparse(base_url).netloc
+
+        logger.info("crawling_homepage_only", domain=domain)
+
+        result = CompanyWebInfo(
+            domain=domain,
+            title=None,
+            description=None,
+            about_text=None,
+            services=[],
+            industries=[],
+            meta_keywords=[],
+            social_links={},
+            contact_info={},
+        )
+
+        try:
+            homepage_html = await self.fetch_page(base_url)
+            if homepage_html:
+                soup = BeautifulSoup(homepage_html, "html.parser")
+
+                # Extract meta info
+                meta = self._extract_meta(soup)
+                result.title = meta["title"]
+                result.description = meta["description"]
+                if meta["keywords"]:
+                    result.meta_keywords = [
+                        k.strip() for k in meta["keywords"].split(",")
+                    ]
+
+                # Extract social links
+                result.social_links = self._extract_social_links(soup, base_url)
+
+                # Extract contact info and services from homepage only
+                homepage_text = self._extract_text(soup)
+                result.contact_info = self._extract_contact_info(homepage_text)
+                result.services = self._extract_services(soup)
+
+                # Use homepage text as about_text substitute
+                result.about_text = homepage_text[:2000]
+
+            logger.info(
+                "homepage_crawl_complete",
+                domain=domain,
+                has_title=result.title is not None,
+                has_description=result.description is not None,
+            )
+
+            return result
+
+        except Exception as e:
+            logger.error("homepage_crawl_failed", domain=domain, error=str(e))
+            raise WebCrawlerError(f"Failed to crawl homepage for {domain}: {e}")
+
     async def get_company_info(self, domain: str) -> CompanyWebInfo:
         """
         Crawl company website and extract validation information.

@@ -22,6 +22,8 @@ class NotificationContent:
     draft_message: str | None
     meeting_agenda: str | None
     suggested_time_slots: list[str] = field(default_factory=list)
+    # Category-specific notification message (e.g., "Action required, lead ready to chat")
+    category_message: str | None = None
 
 
 def generate_suggested_time_slots(
@@ -137,8 +139,24 @@ class NotificationFormatter:
         """Build adaptive card body elements."""
         color = self.PRIORITY_COLORS.get(content.priority, "default")
 
-        body = [
-            # Header with priority badge
+        body = []
+
+        # Category-specific message banner (if available)
+        # Per Requirements.md 3.3.2: show messages like "Action required, lead ready to chat"
+        if content.category_message:
+            body.append(
+                {
+                    "type": "TextBlock",
+                    "text": content.category_message.upper(),
+                    "weight": "bolder",
+                    "size": "large",
+                    "color": color,
+                    "wrap": True,
+                }
+            )
+
+        # Header with priority badge and title
+        body.append(
             {
                 "type": "ColumnSet",
                 "columns": [
@@ -168,8 +186,10 @@ class NotificationFormatter:
                         ],
                     },
                 ],
-            },
-            # Lead info
+            }
+        )
+
+        # Lead info
             {
                 "type": "FactSet",
                 "facts": [
