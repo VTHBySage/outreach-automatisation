@@ -1,6 +1,6 @@
 """Prometheus metrics for application monitoring."""
 
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
 # HTTP request metrics
 REQUEST_COUNT = Counter(
@@ -64,6 +64,76 @@ LEADS_SUPPRESSED = Counter(
     ["reason"],  # unsubscribe, hard_bounce
 )
 
+# Email engagement metrics
+EMAIL_OPENS = Counter(
+    "email_opens_total",
+    "Total email opens tracked",
+    ["campaign_id"],
+)
+EMAIL_CLICKS = Counter(
+    "email_clicks_total",
+    "Total email link clicks tracked",
+    ["campaign_id"],
+)
+EMAIL_REPLIES = Counter(
+    "email_replies_total",
+    "Total email replies received",
+    ["campaign_id"],
+)
+EMAIL_BOUNCES = Counter(
+    "email_bounces_total",
+    "Total email bounces",
+    ["campaign_id", "bounce_type"],  # hard, soft
+)
+EMAIL_UNSUBSCRIBES = Counter(
+    "email_unsubscribes_total",
+    "Total email unsubscribes",
+    ["campaign_id"],
+)
+
+# Rate limit monitoring metrics
+RATE_LIMIT_HITS = Counter(
+    "rate_limit_hits_total",
+    "Total times rate limit was hit (429 responses)",
+    ["integration"],  # hubspot, smartlead, apollo, connectsafely
+)
+RATE_LIMIT_RETRIES = Counter(
+    "rate_limit_retries_total",
+    "Total rate limit retry attempts",
+    ["integration"],
+)
+API_REQUESTS_MINUTE = Gauge(
+    "api_requests_per_minute",
+    "Current API requests per minute by integration",
+    ["integration"],
+)
+RATE_LIMIT_THRESHOLD_ALERTS = Counter(
+    "rate_limit_threshold_alerts_total",
+    "Times rate limit threshold (80%) was crossed",
+    ["integration"],
+)
+
+# Database performance metrics
+DB_QUERY_DURATION = Histogram(
+    "db_query_duration_seconds",
+    "Database query execution time",
+    ["query_type"],  # select, insert, update, delete
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
+DB_SLOW_QUERIES = Counter(
+    "db_slow_queries_total",
+    "Total slow queries (>100ms)",
+    ["query_type"],
+)
+DB_CONNECTION_POOL_SIZE = Gauge(
+    "db_connection_pool_size",
+    "Current database connection pool size",
+)
+DB_CONNECTION_POOL_CHECKED_OUT = Gauge(
+    "db_connection_pool_checked_out",
+    "Number of connections currently checked out from pool",
+)
+
 
 __all__ = [
     "generate_latest",
@@ -78,4 +148,17 @@ __all__ = [
     "TASKS_CREATED",
     "TASKS_SYNCED",
     "LEADS_SUPPRESSED",
+    "EMAIL_OPENS",
+    "EMAIL_CLICKS",
+    "EMAIL_REPLIES",
+    "EMAIL_BOUNCES",
+    "EMAIL_UNSUBSCRIBES",
+    "RATE_LIMIT_HITS",
+    "RATE_LIMIT_RETRIES",
+    "API_REQUESTS_MINUTE",
+    "RATE_LIMIT_THRESHOLD_ALERTS",
+    "DB_QUERY_DURATION",
+    "DB_SLOW_QUERIES",
+    "DB_CONNECTION_POOL_SIZE",
+    "DB_CONNECTION_POOL_CHECKED_OUT",
 ]

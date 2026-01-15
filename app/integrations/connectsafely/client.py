@@ -19,6 +19,7 @@ class ConnectSafelyClient(BaseClient):
         super().__init__(
             base_url=self.BASE_URL,
             api_key=settings.connectsafely_api_key.get_secret_value(),
+            integration_name="connectsafely",
         )
 
     async def find_profile_by_email(self, email: str) -> dict[str, Any] | None:

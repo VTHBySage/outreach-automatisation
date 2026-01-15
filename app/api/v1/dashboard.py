@@ -8,6 +8,8 @@ from sqlalchemy import func, select
 from app.api.v1.schemas import (
     CategoryCount,
     DashboardStats,
+    EmailEngagementStats,
+    EmailMetricsDashboard,
     PriorityCount,
     RecentActivity,
     RecentActivityResponse,
@@ -290,3 +292,139 @@ async def get_re_engagement_contacts(
             for c in contacts
         ],
     }
+
+
+@router.get("/email-metrics", response_model=EmailMetricsDashboard)
+async def get_email_metrics(
+    session: DbSession,
+):
+    """
+    Get email engagement metrics dashboard.
+
+    Returns metrics from Prometheus counters plus database queries
+    for conversion funnel tracking.
+    """
+    from prometheus_client import REGISTRY
+
+    from app.core.constants import MainCategory
+
+    def get_metric_value(metric_name: str, labels: dict | None = None) -> int:
+        """Get current value of a Prometheus counter."""
+        try:
+            for metric in REGISTRY.collect():
+                if metric.name == metric_name:
+                    for sample in metric.samples:
+                        if sample.name == f"{metric_name}_total":
+                            if labels is None:
+                                # Sum all labels
+                                return int(sample.value)
+                            elif all(sample.labels.get(k) == v for k, v in labels.items()):
+                                return int(sample.value)
+            return 0
+        except Exception:
+            return 0
+
+    def sum_metric(metric_name: str) -> int:
+        """Sum all label combinations of a metric."""
+        total = 0
+        try:
+            for metric in REGISTRY.collect():
+                if metric.name == metric_name:
+                    for sample in metric.samples:
+                        if sample.name == f"{metric_name}_total":
+                            total += int(sample.value)
+        except Exception:
+            pass
+        return total
+
+    # Get totals from Prometheus
+    total_opens = sum_metric("email_opens")
+    total_clicks = sum_metric("email_clicks")
+    total_replies = sum_metric("email_replies")
+    total_bounces = sum_metric("email_bounces")
+    total_unsubscribes = sum_metric("email_unsubscribes")
+
+    # Calculate rates (using replies as baseline for sent approximation)
+    # In production, you'd track emails_sent metric separately
+    total_sent = await session.execute(
+        select(func.count()).select_from(EmailReply).where(EmailReply.processed == True)
+    )
+    sent_count = total_sent.scalar() or 1  # Avoid division by zero
+
+    # Calculate conversion funnel from database
+    # Leads -> Replies -> Interested -> Meetings
+    interested_result = await session.execute(
+        select(func.count())
+        .select_from(Contact)
+        .where(Contact.current_category == MainCategory.INTERESTED.value)
+        .where(Contact.deleted_at.is_(None))
+    )
+    interested_count = interested_result.scalar() or 0
+
+    # Tasks of type "follow_up_meeting" or similar indicate meetings
+    meeting_tasks_result = await session.execute(
+        select(func.count())
+        .select_from(Task)
+        .where(Task.task_type.ilike("%meeting%"))
+    )
+    meetings_booked = meeting_tasks_result.scalar() or 0
+
+    # Today's metrics from database (since Prometheus resets on restart)
+    today_start = datetime.combine(date.today(), datetime.min.time())
+
+    today_replies_result = await session.execute(
+        select(func.count())
+        .select_from(EmailReply)
+        .where(EmailReply.received_at >= today_start)
+    )
+    today_replies = today_replies_result.scalar() or 0
+
+    total_engagement = EmailEngagementStats(
+        opens=total_opens,
+        clicks=total_clicks,
+        replies=total_replies,
+        bounces=total_bounces,
+        unsubscribes=total_unsubscribes,
+        open_rate=round(total_opens / sent_count * 100, 2) if sent_count > 0 else None,
+        click_rate=round(total_clicks / sent_count * 100, 2) if sent_count > 0 else None,
+        reply_rate=round(total_replies / sent_count * 100, 2) if sent_count > 0 else None,
+        bounce_rate=round(total_bounces / sent_count * 100, 2) if sent_count > 0 else None,
+    )
+
+    today_engagement = EmailEngagementStats(
+        opens=0,  # Would need timestamp tracking in Prometheus
+        clicks=0,
+        replies=today_replies,
+        bounces=0,
+        unsubscribes=0,
+    )
+
+    # Conversion funnel
+    total_contacts_result = await session.execute(
+        select(func.count())
+        .select_from(Contact)
+        .where(Contact.deleted_at.is_(None))
+    )
+    total_contacts = total_contacts_result.scalar() or 0
+
+    total_replied_result = await session.execute(
+        select(func.count(Contact.id.distinct()))
+        .select_from(Contact)
+        .join(EmailReply, Contact.id == EmailReply.contact_id)
+        .where(Contact.deleted_at.is_(None))
+    )
+    total_replied = total_replied_result.scalar() or 0
+
+    conversion_funnel = {
+        "contacts": total_contacts,
+        "replied": total_replied,
+        "interested": interested_count,
+        "meetings_booked": meetings_booked,
+    }
+
+    return EmailMetricsDashboard(
+        total_engagement=total_engagement,
+        today_engagement=today_engagement,
+        conversion_funnel=conversion_funnel,
+        top_campaigns=None,  # Would need campaign-level tracking
+    )

@@ -29,7 +29,7 @@ You must classify each reply into exactly one of 26 subcategories across 5 main 
 **4. NEGATIVE SIGNALS** - Barriers to conversion
 - 4.1 Happy with competitor - Satisfied with current solution
 - 4.2 Recent purchase - Recently bought competing solution
-- 4.3 Wrong timing - Bad timing but might revisit later
+- 4.3 Wrong timing - Bad timing but might revisit later (IMPORTANT: Extract any mentioned timing like "Q2", "next month", "after summer", "in 3 months")
 
 **5. AUTOMATE REPLY** - Non-human or system responses
 - 5.1 Out of Office - Away from office
@@ -45,6 +45,8 @@ Respond with JSON containing:
 - subcategory: the specific code (e.g., "1.1_ready_to_chat_phone")
 - confidence: 0.0 to 1.0
 - reasoning: brief explanation
+- suggested_followup_date: For "4.3 Wrong timing" ONLY - extract the mentioned timing as ISO date (YYYY-MM-DD). Convert relative terms: "Q1" = March 31, "Q2" = June 30, "Q3" = Sept 30, "Q4" = Dec 31, "next month" = 1st of next month, "in X months" = X months from today. Return null for other categories.
+- referral_info: For "2.1 Referral" ONLY - extract referred person's name and email/company if mentioned. Return null for other categories.
 """
 
 USER_PROMPT_TEMPLATE = """Categorize this email reply:
@@ -79,8 +81,29 @@ RESPONSE_FORMAT = {
                 "subcategory": {"type": "string"},
                 "confidence": {"type": "number"},
                 "reasoning": {"type": "string"},
+                "suggested_followup_date": {
+                    "type": ["string", "null"],
+                    "description": "ISO date (YYYY-MM-DD) for Wrong Timing (4.3) category only",
+                },
+                "referral_info": {
+                    "type": ["object", "null"],
+                    "properties": {
+                        "name": {"type": ["string", "null"]},
+                        "email": {"type": ["string", "null"]},
+                        "company": {"type": ["string", "null"]},
+                    },
+                    "additionalProperties": False,
+                    "description": "Referred person info for Referral (2.1) category only",
+                },
             },
-            "required": ["main_category", "subcategory", "confidence", "reasoning"],
+            "required": [
+                "main_category",
+                "subcategory",
+                "confidence",
+                "reasoning",
+                "suggested_followup_date",
+                "referral_info",
+            ],
             "additionalProperties": False,
         },
     },

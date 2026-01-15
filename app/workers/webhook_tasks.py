@@ -250,6 +250,34 @@ async def _process_smartlead_webhook_async(
             raise e
 
 
+def _record_email_engagement_metrics(event_type: str | None, campaign_id: str | None) -> None:
+    """Record email engagement metrics based on event type."""
+    from app.core.metrics import (
+        EMAIL_BOUNCES,
+        EMAIL_CLICKS,
+        EMAIL_OPENS,
+        EMAIL_REPLIES,
+        EMAIL_UNSUBSCRIBES,
+    )
+
+    campaign = str(campaign_id) if campaign_id else "unknown"
+
+    if event_type == "EMAIL_OPENED":
+        EMAIL_OPENS.labels(campaign_id=campaign).inc()
+    elif event_type == "EMAIL_CLICKED":
+        EMAIL_CLICKS.labels(campaign_id=campaign).inc()
+    elif event_type == "EMAIL_REPLY":
+        EMAIL_REPLIES.labels(campaign_id=campaign).inc()
+    elif event_type == "EMAIL_BOUNCED":
+        EMAIL_BOUNCES.labels(campaign_id=campaign, bounce_type="unknown").inc()
+    elif event_type == "HARD_BOUNCE":
+        EMAIL_BOUNCES.labels(campaign_id=campaign, bounce_type="hard").inc()
+    elif event_type == "SOFT_BOUNCE":
+        EMAIL_BOUNCES.labels(campaign_id=campaign, bounce_type="soft").inc()
+    elif event_type == "EMAIL_UNSUBSCRIBED":
+        EMAIL_UNSUBSCRIBES.labels(campaign_id=campaign).inc()
+
+
 @shared_task(
     bind=True,
     max_retries=3,
@@ -268,18 +296,41 @@ def process_smartlead_webhook(
 
     Flow:
     1. Parse payload
-    2. Find or create contact
-    3. Create email reply record
-    4. Trigger categorization task
+    2. Record email engagement metrics
+    3. Find or create contact
+    4. Create email reply record
+    5. Trigger categorization task
     """
     try:
+        event_type = payload.get("event_type")
+        campaign_id = payload.get("campaign_id")
+
         logger.info(
             "processing_smartlead_webhook",
             webhook_id=webhook_id,
-            event_type=payload.get("event_type"),
+            event_type=event_type,
         )
 
-        # Run async code in sync context
+        # Record engagement metrics for all event types
+        _record_email_engagement_metrics(event_type, campaign_id)
+
+        # Only process replies through full async flow
+        # Other events (opens, clicks, bounces) are tracked in metrics only
+        if event_type not in ("EMAIL_REPLY", None):
+            logger.info(
+                "engagement_event_recorded",
+                webhook_id=webhook_id,
+                event_type=event_type,
+                campaign_id=campaign_id,
+            )
+            return {
+                "status": "recorded",
+                "webhook_id": webhook_id,
+                "event_type": event_type,
+                "campaign_id": str(campaign_id) if campaign_id else None,
+            }
+
+        # Run async code in sync context for replies
         result = run_async(
             _process_smartlead_webhook_async(
                 webhook_id=webhook_id,
@@ -471,6 +522,209 @@ def process_connectsafely_webhook(
     except Exception as e:
         logger.error(
             "connectsafely_webhook_processing_failed",
+            webhook_id=webhook_id,
+            error=str(e),
+        )
+        raise self.retry(exc=e)
+
+
+async def _process_heyreach_webhook_async(
+    webhook_id: str,
+    payload: dict,
+    source: str,
+    received_at_str: str,
+) -> dict:
+    """Async implementation of HeyReach webhook processing."""
+    from app.db.models.webhook_log import WebhookLog
+    from app.db.repositories.contact import ContactRepository
+    from app.db.repositories.email_reply import EmailReplyRepository
+    from app.workers.categorization_tasks import categorize_email_reply
+
+    received_at = datetime.fromisoformat(received_at_str)
+
+    async with async_session_factory() as session:
+        try:
+            event_type = payload.get("event_type")
+            linkedin_url = payload.get("linkedin_url")
+            email = payload.get("email")
+            message_text = payload.get("message_text")
+            message_id = payload.get("message_id") or str(uuid4())
+            first_name = payload.get("first_name")
+            last_name = payload.get("last_name")
+            company_name = payload.get("company_name")
+            campaign_id = payload.get("campaign_id")
+
+            contact_repo = ContactRepository(session)
+            reply_repo = EmailReplyRepository(session)
+
+            # Try to find contact by email or LinkedIn URL
+            contact = None
+            created = False
+            if email:
+                contact = await contact_repo.get_by_email(email)
+
+            if not contact and linkedin_url:
+                contact = await contact_repo.get_by_linkedin_url(linkedin_url)
+
+            # Create contact if not found but we have enough info
+            if not contact and (email or linkedin_url):
+                contact, created = await contact_repo.get_or_create_by_email(
+                    email=email or f"linkedin_{message_id}@heyreach.placeholder",
+                    first_name=first_name,
+                    last_name=last_name,
+                    company_name=company_name,
+                    linkedin_url=linkedin_url,
+                )
+
+            # Log webhook
+            webhook_log = WebhookLog(
+                source=WebhookSource.HEYREACH.value,
+                endpoint="/webhook/heyreach",
+                method="POST",
+                headers={},
+                payload=payload,
+                processed=True,
+                response_status=200,
+                received_at=received_at,
+            )
+            session.add(webhook_log)
+
+            reply_id = None
+
+            # Handle different event types
+            if event_type == "connection_accepted" and contact and linkedin_url:
+                contact.linkedin_url = linkedin_url
+                logger.info(
+                    "heyreach_connection_updated",
+                    webhook_id=webhook_id,
+                    contact_id=str(contact.id),
+                )
+
+            elif event_type == "connection_rejected" and contact:
+                logger.info(
+                    "heyreach_connection_rejected",
+                    webhook_id=webhook_id,
+                    contact_id=str(contact.id) if contact else None,
+                )
+
+            # Handle LinkedIn message replies - categorize them
+            elif event_type == "message_received" and message_text and contact:
+                # Check for duplicate
+                existing_reply = await reply_repo.get_by_external_id(
+                    source=WebhookSource.HEYREACH.value,
+                    external_id=message_id,
+                )
+                if existing_reply:
+                    logger.info(
+                        "duplicate_heyreach_message_skipped",
+                        webhook_id=webhook_id,
+                        external_id=message_id,
+                    )
+                else:
+                    # Create reply record (with race condition protection)
+                    try:
+                        email_reply = await reply_repo.create_from_webhook(
+                            contact_id=contact.id,
+                            source=WebhookSource.HEYREACH.value,
+                            external_id=message_id,
+                            body_text=message_text,
+                            subject="LinkedIn DM (HeyReach)",
+                            received_at=received_at,
+                            campaign_external_id=campaign_id,
+                        )
+                        await session.flush()
+                        reply_id = str(email_reply.id)
+
+                        # Update contact last response
+                        contact.last_response_at = received_at
+                        await session.flush()
+
+                        logger.info(
+                            "heyreach_message_reply_created",
+                            webhook_id=webhook_id,
+                            reply_id=reply_id,
+                            contact_id=str(contact.id),
+                        )
+                    except IntegrityError:
+                        await session.rollback()
+                        logger.info(
+                            "duplicate_heyreach_message_race_condition",
+                            webhook_id=webhook_id,
+                            external_id=message_id,
+                        )
+
+            await session.commit()
+
+            # Queue categorization after commit (if we created a reply)
+            if reply_id:
+                categorize_email_reply.delay(
+                    reply_id=reply_id,
+                    subject="LinkedIn DM (HeyReach)",
+                    body=message_text,
+                    context=None,
+                )
+                logger.info(
+                    "heyreach_message_categorization_queued",
+                    webhook_id=webhook_id,
+                    reply_id=reply_id,
+                )
+
+            return {
+                "status": "processed",
+                "webhook_id": webhook_id,
+                "event_type": event_type,
+                "contact_id": str(contact.id) if contact else None,
+                "contact_created": created,
+                "reply_id": reply_id,
+                "processed_at": datetime.utcnow().isoformat(),
+            }
+
+        except Exception as e:
+            await session.rollback()
+            raise e
+
+
+@shared_task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+)
+def process_heyreach_webhook(
+    self,
+    webhook_id: str,
+    payload: dict,
+    source: str,
+    received_at: str,
+) -> dict:
+    """
+    Process HeyReach (LinkedIn automation) webhook asynchronously.
+
+    Handles:
+    - Connection request accepted/rejected
+    - LinkedIn DM replies
+    - Campaign events
+    """
+    try:
+        logger.info(
+            "processing_heyreach_webhook",
+            webhook_id=webhook_id,
+            event_type=payload.get("event_type"),
+        )
+
+        result = run_async(
+            _process_heyreach_webhook_async(
+                webhook_id=webhook_id,
+                payload=payload,
+                source=source,
+                received_at_str=received_at,
+            )
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(
+            "heyreach_webhook_processing_failed",
             webhook_id=webhook_id,
             error=str(e),
         )

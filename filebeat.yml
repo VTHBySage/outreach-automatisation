@@ -1,0 +1,121 @@
+# Filebeat configuration for Outreach Automation System
+# Ships JSON logs to Elasticsearch for analysis in Kibana
+
+filebeat.inputs:
+
+# Application logs (JSON format)
+- type: log
+  id: outreach-app
+  enabled: true
+  paths:
+    - /var/log/outreach/app.log*
+  json:
+    keys_under_root: true
+    overwrite_keys: true
+    add_error_key: true
+    message_key: event
+  fields:
+    service: outreach-automation
+    environment: "${APP_ENV:development}"
+  fields_under_root: true
+
+# Celery worker logs
+- type: log
+  id: outreach-celery
+  enabled: true
+  paths:
+    - /var/log/outreach/celery*.log*
+  json:
+    keys_under_root: true
+    overwrite_keys: true
+    add_error_key: true
+  fields:
+    service: outreach-celery
+    environment: "${APP_ENV:development}"
+  fields_under_root: true
+
+# Docker container logs (optional - for containerized deployment)
+- type: container
+  id: docker-containers
+  enabled: false
+  paths:
+    - /var/lib/docker/containers/*/*.log
+  processors:
+    - add_docker_metadata:
+        host: "unix:///var/run/docker.sock"
+    - decode_json_fields:
+        fields: ["message"]
+        process_array: false
+        max_depth: 2
+        target: ""
+        overwrite_keys: true
+
+# Processors applied to all inputs
+processors:
+  # Parse JSON timestamp
+  - timestamp:
+      field: timestamp
+      layouts:
+        - '2006-01-02T15:04:05.999999Z07:00'
+        - '2006-01-02T15:04:05Z07:00'
+      test:
+        - '2024-01-15T10:30:00.123456Z'
+      ignore_failure: true
+
+  # Add host metadata
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+
+  # Drop debug logs in production (optional)
+  # - drop_event:
+  #     when:
+  #       equals:
+  #         level: "debug"
+
+  # Add cloud metadata if running in cloud
+  - add_cloud_metadata: ~
+
+# Output to Elasticsearch
+output.elasticsearch:
+  hosts: ["${ELASTICSEARCH_HOSTS:http://localhost:9200}"]
+  index: "outreach-logs-%{[service]}-%{+yyyy.MM.dd}"
+
+  # Index lifecycle management
+  setup.ilm.enabled: true
+  setup.ilm.rollover_alias: "outreach-logs"
+  setup.ilm.pattern: "{now/d}-000001"
+
+# Index template settings
+setup.template.enabled: true
+setup.template.name: "outreach-logs"
+setup.template.pattern: "outreach-logs-*"
+setup.template.settings:
+  index:
+    number_of_shards: 1
+    number_of_replicas: 0
+    refresh_interval: "5s"
+
+setup.template.fields: "fields.yml"
+setup.template.overwrite: false
+
+# Kibana dashboards
+setup.kibana:
+  host: "${KIBANA_HOST:http://localhost:5601}"
+
+# Enable dashboard loading (first run only)
+setup.dashboards.enabled: false
+
+# Logging configuration for Filebeat itself
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /usr/share/filebeat/logs
+  name: filebeat
+  keepfiles: 7
+  permissions: 0640
+
+# Monitoring (optional - ships Filebeat metrics)
+monitoring:
+  enabled: false
+  elasticsearch:
+    hosts: ["${ELASTICSEARCH_HOSTS:http://localhost:9200}"]

@@ -33,6 +33,15 @@ class ContactRepository(BaseRepository[Contact]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_linkedin_url(self, linkedin_url: str) -> Contact | None:
+        """Get contact by LinkedIn URL."""
+        stmt = select(Contact).where(
+            Contact.linkedin_url == linkedin_url,
+            Contact.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_due_for_reengagement(
         self,
         before_date: datetime,

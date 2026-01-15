@@ -26,11 +26,13 @@ class BaseClient:
         api_key: str | None = None,
         timeout: float = 30.0,
         max_retries: int = 3,
+        integration_name: str = "unknown",
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
+        self.integration_name = integration_name
         self._client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -75,11 +77,18 @@ class BaseClient:
 
             # Handle rate limiting (429)
             if response.status_code == 429:
+                # Record metrics
+                from app.core.metrics import RATE_LIMIT_HITS, RATE_LIMIT_RETRIES
+
+                RATE_LIMIT_HITS.labels(integration=self.integration_name).inc()
+
                 retry_after = self._parse_retry_after(response)
                 if _retry_count < self.max_retries:
+                    RATE_LIMIT_RETRIES.labels(integration=self.integration_name).inc()
                     wait_time = retry_after or (2 ** _retry_count)  # Exponential backoff fallback
                     logger.warning(
                         "rate_limit_hit_retrying",
+                        integration=self.integration_name,
                         method=method,
                         path=path,
                         retry_after=wait_time,
@@ -88,6 +97,17 @@ class BaseClient:
                     await asyncio.sleep(wait_time)
                     return await self._request(method, path, _retry_count=_retry_count + 1, **kwargs)
                 else:
+                    # Alert for exhausted retries
+                    try:
+                        import sentry_sdk
+
+                        sentry_sdk.capture_message(
+                            f"Rate limit exhausted for {self.integration_name}",
+                            level="warning",
+                        )
+                    except Exception:
+                        pass  # Sentry may not be configured
+
                     raise RateLimitError(
                         f"Rate limit exceeded after {self.max_retries} retries",
                         retry_after=retry_after,

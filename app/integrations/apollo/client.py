@@ -22,6 +22,7 @@ class ApolloClient(BaseClient):
         super().__init__(
             base_url=self.BASE_URL,
             api_key=api_key,
+            integration_name="apollo",
         )
 
     def _get_default_headers(self) -> dict[str, str]:

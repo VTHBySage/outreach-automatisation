@@ -11,6 +11,7 @@ class HubSpotClient(BaseClient):
         super().__init__(
             base_url=settings.hubspot_api_base_url,
             api_key=settings.hubspot_access_token.get_secret_value(),
+            integration_name="hubspot",
         )
 
     def _get_default_headers(self) -> dict[str, str]:

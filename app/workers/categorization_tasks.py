@@ -5,6 +5,7 @@ from uuid import UUID
 from celery import shared_task
 
 from app.core.constants import SubCategory, TaskPriority
+from app.services.categorization.service import ReferralInfo
 from app.core.logging import get_logger
 from app.core.utils import run_async
 from app.db.session import async_session_factory
@@ -98,6 +99,134 @@ async def _suppress_lead_from_smartlead(
         )
 
 
+async def _process_referral(
+    referrer_contact,
+    referral_info: ReferralInfo,
+    reply,
+    session,
+) -> None:
+    """
+    Auto-process referral: create contact and enroll in campaign.
+
+    Flow:
+    1. Create new contact in database (if email provided)
+    2. Create contact in HubSpot
+    3. Add to SmartLead/ConnectSafely with referral message
+    """
+    from app.db.models.contact import Contact
+    from app.db.repositories.contact import ContactRepository
+    from app.integrations.hubspot import HubSpotContacts
+    from app.integrations.smartlead import SmartLeadClient
+
+    if not referral_info.email and not referral_info.name:
+        logger.warning(
+            "referral_missing_info",
+            referrer_id=str(referrer_contact.id),
+        )
+        return
+
+    contact_repo = ContactRepository(session)
+
+    # Check if referral contact already exists
+    existing_contact = None
+    if referral_info.email:
+        existing_contact = await contact_repo.get_by_email(referral_info.email)
+
+    if existing_contact:
+        logger.info(
+            "referral_contact_exists",
+            referrer_id=str(referrer_contact.id),
+            referral_email=referral_info.email,
+            existing_contact_id=str(existing_contact.id),
+        )
+        return
+
+    # Create new referral contact
+    referral_contact = None
+    if referral_info.email:
+        # Parse name into first/last
+        first_name = None
+        last_name = None
+        if referral_info.name:
+            name_parts = referral_info.name.split()
+            first_name = name_parts[0] if name_parts else None
+            last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else None
+
+        referral_contact = Contact(
+            email=referral_info.email,
+            first_name=first_name,
+            last_name=last_name,
+            company_name=referral_info.company,
+            source="referral",
+            campaign_id=reply.campaign_external_id,
+            validation_notes=f"Referred by {referrer_contact.full_name or referrer_contact.email}",
+        )
+        session.add(referral_contact)
+        await session.flush()
+
+        logger.info(
+            "referral_contact_created",
+            referrer_id=str(referrer_contact.id),
+            referral_contact_id=str(referral_contact.id),
+            referral_email=referral_info.email,
+        )
+
+    # Create in HubSpot
+    if referral_contact and referral_info.email:
+        try:
+            hubspot = HubSpotContacts()
+            hs_contact = await hubspot.create_or_update_contact(
+                email=referral_info.email,
+                first_name=first_name,
+                last_name=last_name,
+                company=referral_info.company,
+            )
+            if hs_contact:
+                referral_contact.hubspot_contact_id = hs_contact.get("id")
+                logger.info(
+                    "referral_hubspot_created",
+                    referral_contact_id=str(referral_contact.id),
+                    hubspot_id=hs_contact.get("id"),
+                )
+        except Exception as e:
+            logger.error(
+                "referral_hubspot_failed",
+                referral_contact_id=str(referral_contact.id),
+                error=str(e),
+            )
+
+    # Add to SmartLead campaign with referral message
+    if referral_contact and reply.campaign_external_id:
+        try:
+            smartlead = SmartLeadClient()
+            referral_message = (
+                f"Hi {first_name or 'there'}, {referrer_contact.full_name or 'A colleague'} "
+                f"at {referrer_contact.company_name or 'your company'} suggested I reach out to you."
+            )
+
+            await smartlead.add_lead_to_campaign(
+                campaign_id=reply.campaign_external_id,
+                email=referral_info.email,
+                first_name=first_name,
+                last_name=last_name,
+                company_name=referral_info.company,
+                custom_fields={"referral_message": referral_message},
+            )
+
+            logger.info(
+                "referral_added_to_campaign",
+                referral_contact_id=str(referral_contact.id),
+                campaign_id=reply.campaign_external_id,
+            )
+        except Exception as e:
+            logger.error(
+                "referral_campaign_add_failed",
+                referral_contact_id=str(referral_contact.id),
+                campaign_id=reply.campaign_external_id,
+                error=str(e),
+            )
+
+
 async def _categorize_email_reply_async(
     reply_id: str,
     subject: str,
@@ -168,6 +297,36 @@ async def _categorize_email_reply_async(
                     contact=contact,
                     reply=reply,
                     reason=result.subcategory.value,
+                )
+
+            # 5.6 Handle prospect-defined timing for WRONG_TIMING category
+            if result.subcategory == SubCategory.WRONG_TIMING and result.suggested_followup_date:
+                from datetime import datetime
+
+                try:
+                    followup_date = datetime.fromisoformat(result.suggested_followup_date)
+                    contact.re_engagement_date = followup_date.date()
+                    contact.re_engagement_category = result.subcategory.value
+                    logger.info(
+                        "prospect_defined_followup_set",
+                        contact_id=str(contact.id),
+                        followup_date=result.suggested_followup_date,
+                    )
+                except ValueError as e:
+                    logger.warning(
+                        "invalid_followup_date",
+                        contact_id=str(contact.id),
+                        date_str=result.suggested_followup_date,
+                        error=str(e),
+                    )
+
+            # 5.7 Handle referral auto-enrollment
+            if result.subcategory == SubCategory.REFERRAL and result.referral_info:
+                await _process_referral(
+                    referrer_contact=contact,
+                    referral_info=result.referral_info,
+                    reply=reply,
+                    session=session,
                 )
 
             # 6. Generate tasks based on categorization

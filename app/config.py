@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     connectsafely_api_key: SecretStr = SecretStr("")
     connectsafely_webhook_secret: SecretStr = SecretStr("")
 
+    # HeyReach (LinkedIn automation)
+    heyreach_api_key: SecretStr = SecretStr("")
+    heyreach_webhook_secret: SecretStr = SecretStr("")
+
     # MS Teams
     msteams_webhook_url: str = ""
 
@@ -71,6 +75,13 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1  # 10% for performance monitoring
     log_level: str = "INFO"
     log_format: Literal["json", "console"] = "json"
+
+    # File logging with rotation
+    log_file_enabled: bool = False  # Enable file logging (use stdout only in containers)
+    log_file_path: str = "/var/log/outreach/app.log"
+    log_file_rotation_days: int = 1  # Rotate daily
+    log_file_retention_days: int = 30  # Keep 30 days of logs
+    log_file_compress: bool = True  # Compress rotated logs
 
     # Scheduler
     scheduler_enabled: bool = True

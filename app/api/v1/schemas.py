@@ -259,6 +259,42 @@ class RecentActivityResponse(BaseModel):
     items: list[RecentActivity]
 
 
+class EmailEngagementStats(BaseModel):
+    """Email engagement statistics from Prometheus metrics."""
+
+    opens: int
+    clicks: int
+    replies: int
+    bounces: int
+    unsubscribes: int
+    open_rate: float | None = None
+    click_rate: float | None = None
+    reply_rate: float | None = None
+    bounce_rate: float | None = None
+
+
+class CampaignROI(BaseModel):
+    """Campaign ROI metrics."""
+
+    campaign_id: str
+    emails_sent: int
+    opens: int
+    clicks: int
+    replies: int
+    meetings_booked: int
+    conversion_rate: float  # replies / emails_sent
+    meeting_rate: float  # meetings / replies
+
+
+class EmailMetricsDashboard(BaseModel):
+    """Email engagement metrics dashboard response."""
+
+    total_engagement: EmailEngagementStats
+    today_engagement: EmailEngagementStats
+    conversion_funnel: dict[str, int]
+    top_campaigns: list[CampaignROI] | None = None
+
+
 # === Common Schemas ===
 
 class MessageResponse(BaseModel):

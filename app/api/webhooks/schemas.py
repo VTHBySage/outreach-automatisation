@@ -113,6 +113,28 @@ class ConnectSafelyWebhookPayload(BaseModel):
         extra = "allow"  # Allow additional fields from ConnectSafely
 
 
+class HeyReachWebhookPayload(BaseModel):
+    """HeyReach LinkedIn automation webhook payload schema."""
+
+    event_type: str = Field(..., description="Type of webhook event")
+    campaign_id: str | None = Field(None, description="HeyReach campaign ID")
+    campaign_name: str | None = Field(None, description="Campaign name")
+    lead_id: str | None = Field(None, description="HeyReach lead ID")
+    linkedin_url: str | None = Field(None, description="LinkedIn profile URL")
+    email: str | None = Field(None, description="Lead's email address")
+    first_name: str | None = Field(None, description="Lead's first name")
+    last_name: str | None = Field(None, description="Lead's last name")
+    company_name: str | None = Field(None, description="Lead's company name")
+    message_id: str | None = Field(None, description="Message ID for replies")
+    message_text: str | None = Field(None, description="Message content")
+    conversation_id: str | None = Field(None, description="LinkedIn conversation ID")
+    connection_status: str | None = Field(None, description="Connection request status")
+    event_timestamp: datetime | None = Field(None, description="When the event occurred")
+
+    class Config:
+        extra = "allow"  # Allow additional fields from HeyReach
+
+
 class WebhookResponse(BaseModel):
     """Standard webhook response."""
 

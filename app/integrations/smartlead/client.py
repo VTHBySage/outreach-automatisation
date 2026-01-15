@@ -19,6 +19,7 @@ class SmartLeadClient(BaseClient):
         super().__init__(
             base_url=self.BASE_URL,
             api_key=settings.smartlead_api_key.get_secret_value(),
+            integration_name="smartlead",
         )
 
     async def get_lead(self, lead_id: str) -> dict[str, Any]:
