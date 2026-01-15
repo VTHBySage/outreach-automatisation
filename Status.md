@@ -28,14 +28,22 @@ Built a full SmartLead API client for managing leads and campaigns:
 - **Lead assignment**: Add leads to campaigns with custom fields, remove leads from campaigns
 - Used by the re-engagement pipeline to add contacts to nurture campaigns automatically
 
+### SmartLead Mailbox Management
+Added API methods for monitoring SmartLead mailbox health:
+- **Warmup status**: `get_warmup_status(email_account_id)` - Check mailbox warmup progress, reputation score, daily limits, warmup days completed
+- **Throttle status**: `get_throttle_status(email_account_id)` - Monitor send rates, daily limits, sent today count, remaining quota, throttle percentage
+- **Master inbox**: `get_master_inbox(limit, offset, status, campaign_id)` - Query unified inbox across all mailboxes with filtering
+
+These methods provide programmatic access to SmartLead's platform metrics for monitoring and alerting.
+
 ### SmartLead Platform Features (Native)
-The following capabilities are provided by SmartLead's platform directly, not implemented in this automation system:
-- **Mailbox warmup/throttling**: Automatic email warmup and sending throttling handled by SmartLead
+The following capabilities are handled by SmartLead's platform directly:
+- **Automatic warmup**: Email warmup execution managed by SmartLead (we monitor via API)
+- **Automatic throttling**: Send rate throttling managed by SmartLead (we monitor via API)
 - **Sequence management**: Email sequences (3-5 steps, 3-5 day intervals) configured in SmartLead UI
-- **Master Inbox**: Unified inbox view available in SmartLead dashboard
 - **Deliverability monitoring**: Sender reputation and bounce tracking managed by SmartLead
 
-Our system integrates with SmartLead via webhooks (receiving replies) and API (managing leads/campaigns), delegating email delivery infrastructure to the platform.
+Our system integrates with SmartLead via webhooks (receiving replies) and API (managing leads/campaigns + monitoring mailbox health).
 
 ---
 
@@ -72,8 +80,10 @@ Built an Apollo.io API client for lead data enrichment:
 - **Person enrichment**: Enrich contact data by email - returns name, phone, LinkedIn URL, title, company details
 - **Organization enrichment**: Enrich company data by domain - returns industry, size, description
 - **Contact info helper**: Combined method that fetches and formats all available contact data
+- **Email validation**: Validate single email deliverability - returns is_valid, deliverability status (deliverable/undeliverable/risky), confidence score
+- **Bulk email validation**: Batch validate up to 100 emails per request with automatic batching for larger lists
 
-Used by lead validation to fetch company information before AI validation, and for enriching contact records with missing data.
+Used by lead validation to fetch company information before AI validation, for enriching contact records with missing data, and for validating email quality before campaign enrollment.
 
 ---
 
@@ -183,6 +193,14 @@ Built full HubSpot CRM integration with separate modules for contacts, tasks, de
 - Failed syncs retry up to 3 times with exponential backoff
 - Hourly batch job catches any tasks that weren't synced
 
+### Notes/Engagements
+Built a HubSpot Notes module for adding notes to contact records:
+- **Create note**: `create_note(contact_id, body, timestamp, owner_id)` - Creates note and associates with contact
+- **Get contact notes**: `get_contact_notes(contact_id, limit)` - Retrieves all notes for a contact via associations API
+- **Delete note**: `delete_note(note_id)` - Removes a note
+
+Uses HubSpot's CRM v3 notes API with v4 associations for linking notes to contacts. Useful for audit trails and manual annotations.
+
 ### Meeting Scheduling
 Built meeting scheduling integration for booking calls with interested leads:
 - **Get meeting link**: Retrieves personalized meeting links for HubSpot owners
@@ -250,6 +268,51 @@ While re-engagement scheduling is automated, outbound actions have human oversig
 - Re-engagement timelines are conservative (30-365 days based on category)
 - Daily processing limits prevent bulk spam (100 contacts/run)
 - All outbound actions logged for audit
+
+---
+
+## Channel Switching (Multi-Channel Orchestration)
+
+Implemented automatic channel switching for the Email → LinkedIn → Phone flow when contacts don't respond.
+
+### Service Architecture
+Built `ChannelSwitchingService` that orchestrates outreach across channels:
+- **Email to LinkedIn**: After 3 days without response on email, automatically triggers LinkedIn outreach
+- **LinkedIn to Phone**: After 5 more days without LinkedIn response, escalates to phone call task
+
+### Channel Switch Process
+
+**Email → LinkedIn Transition:**
+1. System detects contact has been emailed but no response for 3+ days
+2. Looks up LinkedIn profile via ConnectSafely (by email if not already stored)
+3. Queues LinkedIn connection request for human approval
+4. Updates contact's `current_channel` to "linkedin"
+5. Records `channel_switched_at` timestamp
+
+**LinkedIn → Phone Transition:**
+1. System detects LinkedIn channel active but no response for 5+ days
+2. Creates high-priority phone call task with contact details
+3. Updates contact's `current_channel` to "phone"
+4. Phone is the terminal state (no further automatic escalation)
+
+### Database Fields Added
+New fields on Contact model:
+- `current_channel` - Current outreach channel (email/linkedin/phone), defaults to "email"
+- `channel_switched_at` - Timestamp of last channel switch
+- `last_engagement_at` - Timestamp of last engagement activity
+
+### Background Job
+Daily Celery task `process_channel_switches` runs at 10 AM:
+1. Finds all contacts eligible for channel switching
+2. Processes email contacts with 3+ days no response
+3. Processes LinkedIn contacts with 5+ days no response
+4. Logs results: contacts switched to LinkedIn, switched to phone, skipped, errors
+
+### Human-in-the-Loop
+All channel switches respect the human approval requirement:
+- LinkedIn connection requests are queued for approval (not auto-sent)
+- Phone tasks require manual action
+- System handles orchestration, humans handle execution
 
 ---
 
@@ -410,10 +473,16 @@ Built a lead scoring service that calculates engagement scores for contacts on a
 
 ## Background Jobs
 
-### Daily - Re-engagement Processing
+### Daily - Re-engagement Processing (9 AM)
 - Runs at configurable time (recommended 9 AM)
 - Processes up to 100 contacts per run
 - Adds to appropriate outreach channel
+
+### Daily - Channel Switching (10 AM)
+- Checks contacts for channel escalation
+- Email → LinkedIn after 3 days no response
+- LinkedIn → Phone after 5 more days no response
+- Creates approval tasks for LinkedIn, phone call tasks for phone
 
 ### Hourly - Pending Task Sync
 - Catches tasks that failed initial sync or were created manually
@@ -434,6 +503,7 @@ Built a lead scoring service that calculates engagement scores for contacts on a
 - **Campaign tracking**: campaign_id, source (apollo/linkedin/manual)
 - **Re-engagement**: re_engagement_date, re_engagement_category
 - **Status**: last_contacted_at, last_response_at, current_category, current_subcategory
+- **Channel switching**: current_channel (email/linkedin/phone), channel_switched_at, last_engagement_at
 - **External IDs**: hubspot_contact_id, apollo_id, smartlead_lead_id
 - **Soft delete support** with deleted_at timestamp
 
@@ -884,7 +954,7 @@ open http://localhost:5601
 
 ## Implementation Summary
 
-All 10 requirement gaps have been implemented:
+All requirement gaps have been implemented:
 
 | # | Gap | Status | Implementation |
 |---|-----|--------|----------------|
@@ -898,6 +968,10 @@ All 10 requirement gaps have been implemented:
 | 8 | DB Monitoring | ✅ Complete | SQLAlchemy event listeners |
 | 9 | ELK Integration | ✅ Complete | docker-compose.elk.yml + filebeat.yml |
 | 10 | Log Rotation | ✅ Complete | CompressedTimedRotatingFileHandler |
+| 11 | Apollo Email Validation | ✅ Complete | `validate_email()`, `validate_emails()` methods |
+| 12 | SmartLead Mailbox Monitoring | ✅ Complete | `get_warmup_status()`, `get_throttle_status()`, `get_master_inbox()` |
+| 13 | HubSpot Notes | ✅ Complete | `app/integrations/hubspot/notes.py` |
+| 14 | Channel Switching | ✅ Complete | `app/services/channel_switching/` + Celery task |
 
 ### Files Created
 - `app/integrations/webcrawler/__init__.py`
@@ -907,6 +981,13 @@ All 10 requirement gaps have been implemented:
 - `app/api/webhooks/heyreach.py`
 - `docker-compose.elk.yml`
 - `filebeat.yml`
+- `app/integrations/hubspot/notes.py` - HubSpot notes/engagements module
+- `app/services/channel_switching/__init__.py` - Channel switching package
+- `app/services/channel_switching/service.py` - Channel switching service
+- `app/workers/channel_tasks.py` - Channel switching Celery tasks
+- `app/db/migrations/versions/002_add_channel_switching_fields.py` - Migration for channel fields
+- `tests.md` - Comprehensive test scenarios (192 tests)
+- `tests_refined.md` - Human-readable test documentation
 
 ### Files Modified
 - `app/api/v1/dashboard.py` - Added email metrics endpoint
@@ -918,12 +999,15 @@ All 10 requirement gaps have been implemented:
 - `app/core/metrics.py` - Added 13 new Prometheus metrics
 - `app/db/repositories/contact.py` - Added `get_by_linkedin_url()`
 - `app/db/session.py` - Added SQLAlchemy event listeners
+- `app/db/models/contact.py` - Added channel switching fields (current_channel, channel_switched_at, last_engagement_at)
 - `app/integrations/base.py` - Added integration name tracking
-- `app/integrations/apollo/client.py` - Added integration name
+- `app/integrations/apollo/client.py` - Added integration name + email validation methods
 - `app/integrations/connectsafely/client.py` - Added integration name
 - `app/integrations/hubspot/client.py` - Added integration name
-- `app/integrations/smartlead/client.py` - Added integration name
+- `app/integrations/hubspot/__init__.py` - Export HubSpotNotes
+- `app/integrations/smartlead/client.py` - Added integration name + mailbox management methods
 - `app/services/categorization/prompts.py` - Added timing/referral fields
 - `app/services/categorization/service.py` - Added web/LinkedIn enrichment
 - `app/workers/categorization_tasks.py` - Added timing/referral handling
 - `app/workers/webhook_tasks.py` - Added HeyReach task + engagement metrics
+- `app/workers/celery_app.py` - Added channel_tasks to autodiscover + beat schedule
