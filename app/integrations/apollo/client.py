@@ -110,3 +110,69 @@ class ApolloClient(BaseClient):
         except Exception as e:
             logger.warning("contact_enrichment_failed", email=email, error=str(e))
             return {}
+
+    async def validate_email(self, email: str) -> dict[str, Any]:
+        """
+        Validate single email deliverability via Apollo.
+
+        Args:
+            email: Email address to validate
+
+        Returns:
+            dict with validation results:
+                - email: The validated email
+                - is_valid: Boolean indicating if email is valid
+                - deliverability: 'deliverable', 'undeliverable', or 'risky'
+                - confidence: Confidence score (0.0 to 1.0)
+
+        Raises:
+            ApolloError: If validation fails
+        """
+        try:
+            response = await self.post(
+                "/email_accounts/verify",
+                json={"email": email},
+            )
+            return {
+                "email": email,
+                "is_valid": response.get("is_valid", False),
+                "deliverability": response.get("deliverability", "unknown"),
+                "confidence": response.get("confidence_score", 0.0),
+            }
+        except Exception as e:
+            raise ApolloError(f"Failed to validate email {email}: {e}")
+
+    async def validate_emails(
+        self,
+        emails: list[str],
+        batch_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """
+        Bulk validate emails (batch of up to 100 per request).
+
+        Args:
+            emails: List of email addresses to validate
+            batch_size: Maximum emails per batch (default 100, Apollo limit)
+
+        Returns:
+            List of validation results for each email
+
+        Raises:
+            ApolloError: If bulk validation fails
+        """
+        try:
+            all_results: list[dict[str, Any]] = []
+
+            # Process in batches
+            for i in range(0, len(emails), batch_size):
+                batch = emails[i : i + batch_size]
+                response = await self.post(
+                    "/email_accounts/bulk_verify",
+                    json={"emails": batch},
+                )
+                results = response.get("results", [])
+                all_results.extend(results)
+
+            return all_results
+        except Exception as e:
+            raise ApolloError(f"Failed to bulk validate emails: {e}")

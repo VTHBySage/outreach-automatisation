@@ -226,3 +226,82 @@ class SmartLeadClient(BaseClient):
             }
         except Exception as e:
             raise SmartLeadError(f"Failed to remove {email} from all campaigns: {e}")
+
+    async def get_warmup_status(
+        self,
+        email_account_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get mailbox warmup status.
+
+        Args:
+            email_account_id: Specific email account ID, or None for all accounts
+
+        Returns:
+            Warmup status with fields:
+                - accounts: List of account warmup statuses
+                - Each account has: id, email, warmup_enabled, warmup_reputation,
+                  daily_limit, warmup_days_completed
+        """
+        try:
+            if email_account_id:
+                return await self.get(f"/email-accounts/{email_account_id}/warmup")
+            return await self.get("/email-accounts/warmup/status")
+        except Exception as e:
+            raise SmartLeadError(f"Failed to get warmup status: {e}")
+
+    async def get_throttle_status(
+        self,
+        email_account_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get current send rate and throttling information.
+
+        Args:
+            email_account_id: Specific email account ID, or None for all accounts
+
+        Returns:
+            Throttle status with fields:
+                - accounts: List of account throttle statuses
+                - Each account has: id, email, daily_limit, sent_today,
+                  remaining_today, throttle_percentage, is_throttled
+        """
+        try:
+            if email_account_id:
+                return await self.get(f"/email-accounts/{email_account_id}/throttle")
+            return await self.get("/email-accounts/throttle/status")
+        except Exception as e:
+            raise SmartLeadError(f"Failed to get throttle status: {e}")
+
+    async def get_master_inbox(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: str | None = None,
+        campaign_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Query unified inbox across all mailboxes.
+
+        Args:
+            limit: Maximum messages to return (default 50)
+            offset: Pagination offset
+            status: Filter by status ('replied', 'pending', 'sent', etc.)
+            campaign_id: Filter by campaign
+
+        Returns:
+            Unified inbox with fields:
+                - messages: List of messages across all accounts
+                - total: Total message count
+                - Each message has: id, from_email, to_email, subject,
+                  body_preview, status, sent_at, campaign_id
+        """
+        try:
+            params: dict[str, Any] = {"limit": limit, "offset": offset}
+            if status:
+                params["status"] = status
+            if campaign_id:
+                params["campaign_id"] = campaign_id
+            return await self.get("/inbox/messages", params=params)
+        except Exception as e:
+            raise SmartLeadError(f"Failed to get master inbox: {e}")

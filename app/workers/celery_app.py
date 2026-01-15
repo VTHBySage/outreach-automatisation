@@ -37,6 +37,7 @@ celery_app.conf.update(
         "app.workers.notification_tasks.*": {"queue": "notifications"},
         "app.workers.scheduler_tasks.*": {"queue": "scheduler"},
         "app.workers.linkedin_tasks.*": {"queue": "linkedin"},
+        "app.workers.channel_tasks.*": {"queue": "scheduler"},  # Channel switching uses scheduler queue
     },
     # Default queue
     task_default_queue="default",
@@ -55,6 +56,7 @@ celery_app.autodiscover_tasks(
         "app.workers.notification_tasks",
         "app.workers.scheduler_tasks",
         "app.workers.linkedin_tasks",
+        "app.workers.channel_tasks",
     ]
 )
 
@@ -81,5 +83,9 @@ celery_app.conf.beat_schedule = {
     "linkedin-approval-checker": {
         "task": "app.workers.linkedin_tasks.check_task_completion_for_approval",
         "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "daily-channel-switching": {
+        "task": "app.workers.channel_tasks.process_channel_switches",
+        "schedule": crontab(hour=10, minute=0),  # 10 AM daily
     },
 }

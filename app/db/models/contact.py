@@ -56,6 +56,15 @@ class Contact(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     current_category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     current_subcategory: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    # Channel switching (Email → LinkedIn → Phone)
+    current_channel: Mapped[str] = mapped_column(
+        String(20),
+        default="email",
+        nullable=False,
+    )
+    channel_switched_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_engagement_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
     # External IDs
     hubspot_contact_id: Mapped[str | None] = mapped_column(String(50), unique=True, nullable=True)
     apollo_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
