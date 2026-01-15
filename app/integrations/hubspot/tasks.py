@@ -122,4 +122,9 @@ class HubSpotTasks:
 
     def get_task_url(self, task_id: str) -> str:
         """Get direct URL to task in HubSpot."""
+        from app.config import settings
+
+        portal_id = settings.hubspot_portal_id
+        if portal_id:
+            return f"https://app.hubspot.com/contacts/{portal_id}/tasks/list/view/all?taskId={task_id}"
         return f"https://app.hubspot.com/tasks/{task_id}"

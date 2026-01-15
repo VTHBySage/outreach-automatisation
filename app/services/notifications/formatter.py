@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from app.core.constants import TaskPriority
 
@@ -27,6 +28,7 @@ def generate_suggested_time_slots(
     num_slots: int = 3,
     start_hour: int = 9,
     end_hour: int = 17,
+    prospect_timezone: str | None = None,
 ) -> list[str]:
     """
     Generate suggested meeting time slots for the next few business days.
@@ -35,12 +37,21 @@ def generate_suggested_time_slots(
         num_slots: Number of slots to generate
         start_hour: Business day start (default 9 AM)
         end_hour: Business day end (default 5 PM)
+        prospect_timezone: IANA timezone string (e.g., "America/New_York", "Europe/London")
+                          If provided, times will be shown in the prospect's timezone
 
     Returns:
         List of formatted time slot strings
     """
     slots = []
-    now = datetime.now(timezone.utc)
+
+    # Use prospect's timezone if provided, otherwise UTC
+    try:
+        tz = ZoneInfo(prospect_timezone) if prospect_timezone else timezone.utc
+    except Exception:
+        tz = timezone.utc  # Fallback to UTC if invalid timezone
+
+    now = datetime.now(tz)
 
     # Start from next business day if after business hours
     current = now

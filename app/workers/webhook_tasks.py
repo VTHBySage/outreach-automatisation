@@ -4,6 +4,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from celery import shared_task
+from sqlalchemy.exc import IntegrityError
 
 from app.core.constants import WebhookSource
 from app.core.logging import get_logger
@@ -167,17 +168,32 @@ async def _process_smartlead_webhook_async(
                     "webhook_id": webhook_id,
                 }
 
-            # 3. Create email reply record
-            email_reply = await reply_repo.create_from_webhook(
-                contact_id=contact.id,
-                source=WebhookSource.SMARTLEAD.value,
-                external_id=external_id,
-                body_text=reply_text,
-                subject=subject,
-                body_html=reply_html,
-                received_at=received_at,
-                campaign_external_id=campaign_id,
-            )
+            # 3. Create email reply record (with race condition protection)
+            try:
+                email_reply = await reply_repo.create_from_webhook(
+                    contact_id=contact.id,
+                    source=WebhookSource.SMARTLEAD.value,
+                    external_id=external_id,
+                    body_text=reply_text,
+                    subject=subject,
+                    body_html=reply_html,
+                    received_at=received_at,
+                    campaign_external_id=campaign_id,
+                )
+                await session.flush()
+            except IntegrityError:
+                # Race condition: another process created this reply between our check and create
+                await session.rollback()
+                logger.info(
+                    "duplicate_reply_race_condition",
+                    webhook_id=webhook_id,
+                    external_id=external_id,
+                )
+                return {
+                    "status": "skipped",
+                    "reason": "duplicate",
+                    "webhook_id": webhook_id,
+                }
 
             logger.info(
                 "email_reply_created",
@@ -352,27 +368,37 @@ async def _process_connectsafely_webhook_async(
                         external_id=message_id,
                     )
                 else:
-                    # Create reply record for LinkedIn DM
-                    email_reply = await reply_repo.create_from_webhook(
-                        contact_id=contact.id,
-                        source=WebhookSource.CONNECTSAFELY.value,
-                        external_id=message_id,
-                        body_text=message_text,
-                        subject="LinkedIn DM",
-                        received_at=received_at,
-                    )
-                    reply_id = str(email_reply.id)
+                    # Create reply record for LinkedIn DM (with race condition protection)
+                    try:
+                        email_reply = await reply_repo.create_from_webhook(
+                            contact_id=contact.id,
+                            source=WebhookSource.CONNECTSAFELY.value,
+                            external_id=message_id,
+                            body_text=message_text,
+                            subject="LinkedIn DM",
+                            received_at=received_at,
+                        )
+                        await session.flush()
+                        reply_id = str(email_reply.id)
 
-                    # Update contact last response
-                    contact.last_response_at = received_at
-                    await session.flush()
+                        # Update contact last response
+                        contact.last_response_at = received_at
+                        await session.flush()
 
-                    logger.info(
-                        "linkedin_dm_reply_created",
-                        webhook_id=webhook_id,
-                        reply_id=reply_id,
-                        contact_id=str(contact.id),
-                    )
+                        logger.info(
+                            "linkedin_dm_reply_created",
+                            webhook_id=webhook_id,
+                            reply_id=reply_id,
+                            contact_id=str(contact.id),
+                        )
+                    except IntegrityError:
+                        # Race condition: another process created this reply
+                        await session.rollback()
+                        logger.info(
+                            "duplicate_linkedin_dm_race_condition",
+                            webhook_id=webhook_id,
+                            external_id=message_id,
+                        )
 
             await session.commit()
 

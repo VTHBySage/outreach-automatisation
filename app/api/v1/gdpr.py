@@ -135,7 +135,6 @@ async def export_contact_data(
             {
                 "id": str(log.id),
                 "source": log.source,
-                "event_type": log.event_type,
                 "received_at": log.received_at.isoformat() if log.received_at else None,
             }
             for log in webhook_logs
