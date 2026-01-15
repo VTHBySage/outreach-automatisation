@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
 from app.api.v1.schemas import (
+    CampaignROI,
     CategoryCount,
     DashboardStats,
     EmailEngagementStats,
@@ -13,9 +14,11 @@ from app.api.v1.schemas import (
     PriorityCount,
     RecentActivity,
     RecentActivityResponse,
+    ROIDashboard,
 )
 from app.core.constants import TaskStatus
 from app.core.logging import get_logger
+from app.db.models.campaign import Campaign
 from app.db.models.contact import Contact
 from app.db.models.email_reply import EmailReply
 from app.db.models.task import Task
@@ -426,5 +429,152 @@ async def get_email_metrics(
         total_engagement=total_engagement,
         today_engagement=today_engagement,
         conversion_funnel=conversion_funnel,
-        top_campaigns=None,  # Would need campaign-level tracking
+        top_campaigns=None,  # Use /roi endpoint for campaign-level tracking
+    )
+
+
+@router.get("/roi", response_model=ROIDashboard)
+async def get_campaign_roi(
+    session: DbSession,
+):
+    """
+    Get Campaign ROI Dashboard.
+
+    Calculates comprehensive ROI metrics including:
+    - Cost per lead and cost per meeting
+    - Conversion rates at each funnel stage
+    - Potential revenue based on meetings booked
+    - Overall ROI percentage
+    """
+    from decimal import Decimal
+
+    from app.core.constants import MainCategory
+
+    # Get all active campaigns with their metrics
+    campaigns_query = select(Campaign).where(
+        Campaign.deleted_at.is_(None),
+        Campaign.status == "active",
+    )
+    campaigns_result = await session.execute(campaigns_query)
+    campaigns = campaigns_result.scalars().all()
+
+    campaign_rois: list[CampaignROI] = []
+    total_emails_sent = 0
+    total_cost = Decimal("0")
+    total_replies = 0
+    total_interested = 0
+    total_meetings = 0
+    total_potential_revenue = Decimal("0")
+
+    for campaign in campaigns:
+        # Get contacts in this campaign
+        contacts_in_campaign = await session.execute(
+            select(func.count())
+            .select_from(Contact)
+            .where(Contact.campaign_id == campaign.id)
+            .where(Contact.deleted_at.is_(None))
+        )
+        contacts_count = contacts_in_campaign.scalar() or 0
+
+        # Get replies for contacts in this campaign
+        replies_query = await session.execute(
+            select(func.count())
+            .select_from(EmailReply)
+            .join(Contact, EmailReply.contact_id == Contact.id)
+            .where(Contact.campaign_id == campaign.id)
+            .where(Contact.deleted_at.is_(None))
+        )
+        replies_count = replies_query.scalar() or 0
+
+        # Get interested leads in this campaign
+        interested_query = await session.execute(
+            select(func.count())
+            .select_from(Contact)
+            .where(Contact.campaign_id == campaign.id)
+            .where(Contact.current_category == MainCategory.INTERESTED.value)
+            .where(Contact.deleted_at.is_(None))
+        )
+        interested_count = interested_query.scalar() or 0
+
+        # Get meetings booked for this campaign
+        meetings_query = await session.execute(
+            select(func.count())
+            .select_from(Task)
+            .join(Contact, Task.contact_id == Contact.id)
+            .where(Contact.campaign_id == campaign.id)
+            .where(Task.task_type.ilike("%meeting%"))
+        )
+        meetings_count = meetings_query.scalar() or 0
+
+        # Calculate campaign metrics
+        emails_sent = campaign.total_emails_sent or contacts_count
+        cost_per_email = float(campaign.cost_per_email or Decimal("0.05"))
+        campaign_cost = emails_sent * cost_per_email
+        avg_deal_value = float(campaign.average_deal_value or Decimal("5000.00"))
+
+        # Calculate rates
+        conversion_rate = (replies_count / emails_sent * 100) if emails_sent > 0 else 0.0
+        meeting_rate = (meetings_count / replies_count * 100) if replies_count > 0 else 0.0
+
+        # Calculate cost metrics
+        cost_per_lead = campaign_cost / replies_count if replies_count > 0 else None
+        cost_per_meeting = campaign_cost / meetings_count if meetings_count > 0 else None
+
+        # Calculate potential revenue and ROI
+        potential_revenue = meetings_count * avg_deal_value
+        roi_percentage = None
+        if campaign_cost > 0:
+            roi_percentage = ((potential_revenue - campaign_cost) / campaign_cost) * 100
+
+        campaign_roi = CampaignROI(
+            campaign_id=str(campaign.id),
+            campaign_name=campaign.name,
+            emails_sent=emails_sent,
+            opens=0,  # Would need SmartLead tracking data
+            clicks=0,  # Would need SmartLead tracking data
+            replies=replies_count,
+            interested_leads=interested_count,
+            meetings_booked=meetings_count,
+            conversion_rate=round(conversion_rate, 2),
+            meeting_rate=round(meeting_rate, 2),
+            cost_per_email=cost_per_email,
+            total_cost=round(campaign_cost, 2),
+            cost_per_lead=round(cost_per_lead, 2) if cost_per_lead else None,
+            cost_per_meeting=round(cost_per_meeting, 2) if cost_per_meeting else None,
+            average_deal_value=avg_deal_value,
+            potential_revenue=round(potential_revenue, 2),
+            roi_percentage=round(roi_percentage, 2) if roi_percentage else None,
+        )
+        campaign_rois.append(campaign_roi)
+
+        # Accumulate totals
+        total_emails_sent += emails_sent
+        total_cost += Decimal(str(campaign_cost))
+        total_replies += replies_count
+        total_interested += interested_count
+        total_meetings += meetings_count
+        total_potential_revenue += Decimal(str(potential_revenue))
+
+    # Calculate overall metrics
+    overall_reply_rate = (total_replies / total_emails_sent * 100) if total_emails_sent > 0 else 0.0
+    overall_meeting_rate = (total_meetings / total_replies * 100) if total_replies > 0 else 0.0
+    overall_cost_per_lead = float(total_cost / total_replies) if total_replies > 0 else None
+    overall_cost_per_meeting = float(total_cost / total_meetings) if total_meetings > 0 else None
+    overall_roi = None
+    if total_cost > 0:
+        overall_roi = float((total_potential_revenue - total_cost) / total_cost * 100)
+
+    return ROIDashboard(
+        total_emails_sent=total_emails_sent,
+        total_cost=round(float(total_cost), 2),
+        total_replies=total_replies,
+        total_interested=total_interested,
+        total_meetings=total_meetings,
+        overall_reply_rate=round(overall_reply_rate, 2),
+        overall_meeting_rate=round(overall_meeting_rate, 2),
+        overall_cost_per_lead=round(overall_cost_per_lead, 2) if overall_cost_per_lead else None,
+        overall_cost_per_meeting=round(overall_cost_per_meeting, 2) if overall_cost_per_meeting else None,
+        potential_revenue=round(float(total_potential_revenue), 2),
+        overall_roi_percentage=round(overall_roi, 2) if overall_roi else None,
+        campaigns=campaign_rois,
     )

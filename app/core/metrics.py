@@ -134,6 +134,33 @@ DB_CONNECTION_POOL_CHECKED_OUT = Gauge(
     "Number of connections currently checked out from pool",
 )
 
+# ROI and Business Metrics
+EMAILS_SENT = Counter(
+    "emails_sent_total",
+    "Total emails sent by campaign",
+    ["campaign_id"],
+)
+MEETINGS_BOOKED = Counter(
+    "meetings_booked_total",
+    "Total meetings booked by campaign",
+    ["campaign_id"],
+)
+INTERESTED_LEADS = Counter(
+    "interested_leads_total",
+    "Total leads categorized as interested by campaign",
+    ["campaign_id"],
+)
+CAMPAIGN_COST = Gauge(
+    "campaign_cost_dollars",
+    "Total campaign cost in dollars",
+    ["campaign_id"],
+)
+CAMPAIGN_POTENTIAL_REVENUE = Gauge(
+    "campaign_potential_revenue_dollars",
+    "Potential revenue from meetings booked",
+    ["campaign_id"],
+)
+
 
 __all__ = [
     "generate_latest",
@@ -161,4 +188,9 @@ __all__ = [
     "DB_SLOW_QUERIES",
     "DB_CONNECTION_POOL_SIZE",
     "DB_CONNECTION_POOL_CHECKED_OUT",
+    "EMAILS_SENT",
+    "MEETINGS_BOOKED",
+    "INTERESTED_LEADS",
+    "CAMPAIGN_COST",
+    "CAMPAIGN_POTENTIAL_REVENUE",
 ]

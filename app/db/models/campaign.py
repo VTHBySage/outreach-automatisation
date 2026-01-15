@@ -80,6 +80,24 @@ class Campaign(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
         comment="Optional custom prompt for LLM validation",
     )
 
+    # ROI Tracking fields
+    cost_per_email: Mapped[Decimal | None] = mapped_column(
+        default=Decimal("0.05"),
+        nullable=True,
+        comment="Cost per email sent (default $0.05 for SmartLead)",
+    )
+    average_deal_value: Mapped[Decimal | None] = mapped_column(
+        default=Decimal("5000.00"),
+        nullable=True,
+        comment="Average deal value for conversion tracking",
+    )
+    total_emails_sent: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Total emails sent in this campaign",
+    )
+
     # Relationships
     contacts: Mapped[list["Contact"]] = relationship(
         "Contact",

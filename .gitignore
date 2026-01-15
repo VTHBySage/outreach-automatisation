@@ -76,3 +76,9 @@ celerybeat.pid
 
 # Alembic
 alembic/versions/*.pyc
+
+# Claude Code
+.claude/
+
+# Documentation PDFs (requirements)
+*.pdf

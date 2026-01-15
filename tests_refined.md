@@ -1,6 +1,6 @@
 # Test Scenarios - Human Readable Version
 
-This document contains 192 hypothetical test scenarios organized by functional area. Each test describes what to send, what should happen, and how to verify success.
+This document contains 221 hypothetical test scenarios organized by functional area. Each test describes what to send, what should happen, and how to verify success.
 
 ---
 
@@ -29,8 +29,10 @@ This document contains 192 hypothetical test scenarios organized by functional a
 21. [Maintenance Tasks](#21-maintenance-tasks) (4 tests)
 22. [Database Validation](#22-database-validation) (4 tests)
 23. [Apollo.io Functions](#23-apolloio-additional-functions) (3 tests)
+24. [Campaign Management API](#24-campaign-management-api) (10 tests)
+25. [ROI Dashboard & Metrics](#25-roi-dashboard--metrics) (19 tests)
 
-**Total: 192 tests**
+**Total: 221 tests**
 
 ---
 
@@ -584,6 +586,68 @@ This document contains 192 hypothetical test scenarios organized by functional a
 
 ---
 
+## 24. Campaign Management API
+
+### Campaign CRUD Operations
+
+| Test ID | What to Test | Input | Expected Result |
+|---------|--------------|-------|-----------------|
+| CAMP-001 | List campaigns | GET /api/v1/campaigns | Returns list of all active campaigns with ROI fields |
+| CAMP-002 | Create campaign | POST /api/v1/campaigns with name, target criteria | Returns new campaign with default ROI settings |
+| CAMP-003 | Get campaign by ID | GET /api/v1/campaigns/{id} | Returns campaign details including cost_per_email, average_deal_value |
+| CAMP-004 | Filter campaigns by status | GET /api/v1/campaigns?status=active | Returns only active campaigns |
+| CAMP-005 | Delete campaign | DELETE /api/v1/campaigns/{id} | Soft deletes campaign, returns success message |
+
+### Campaign ROI Settings
+
+| Test ID | What to Test | Input | Expected Result |
+|---------|--------------|-------|-----------------|
+| CAMP-006 | Update cost per email | PATCH /api/v1/campaigns/{id}/roi with cost_per_email=0.08 | Returns updated campaign with new cost |
+| CAMP-007 | Update average deal value | PATCH /api/v1/campaigns/{id}/roi with average_deal_value=7500 | Returns updated campaign with new deal value |
+| CAMP-008 | Update total emails sent | PATCH /api/v1/campaigns/{id}/roi with total_emails_sent=500 | Returns updated campaign with email count |
+| CAMP-009 | Increment emails sent | POST /api/v1/campaigns/{id}/increment-emails?count=50 | Increments total_emails_sent by 50 |
+| CAMP-010 | Partial ROI update | PATCH with only cost_per_email | Other ROI fields unchanged |
+
+---
+
+## 25. ROI Dashboard & Metrics
+
+### ROI Endpoint Tests
+
+| Test ID | What to Test | Input | Expected Result |
+|---------|--------------|-------|-----------------|
+| ROI-001 | Get ROI dashboard | GET /api/v1/dashboard/roi | Returns ROIDashboard with aggregate and per-campaign metrics |
+| ROI-002 | Conversion rate calculation | Campaign with 100 sent, 10 replies | conversion_rate = 10.0% |
+| ROI-003 | Meeting rate calculation | Campaign with 10 replies, 2 meetings | meeting_rate = 20.0% |
+| ROI-004 | Cost per lead calculation | Campaign with $50 cost, 10 replies | cost_per_lead = $5.00 |
+| ROI-005 | Cost per meeting calculation | Campaign with $50 cost, 2 meetings | cost_per_meeting = $25.00 |
+| ROI-006 | Potential revenue calculation | 2 meetings × $5000 deal value | potential_revenue = $10,000 |
+| ROI-007 | ROI percentage calculation | $10,000 revenue - $50 cost / $50 cost | roi_percentage = 19,900% |
+| ROI-008 | Zero emails edge case | Campaign with 0 emails sent | conversion_rate = 0, no division error |
+| ROI-009 | Zero replies edge case | Campaign with 0 replies | cost_per_lead = null, no division error |
+
+### Aggregate Metrics
+
+| Test ID | What to Test | Input | Expected Result |
+|---------|--------------|-------|-----------------|
+| ROI-010 | Total emails across campaigns | Multiple campaigns | Sum of all campaign emails_sent |
+| ROI-011 | Total cost calculation | Multiple campaigns | Sum of (emails_sent × cost_per_email) per campaign |
+| ROI-012 | Overall reply rate | All campaigns | total_replies / total_emails_sent × 100 |
+| ROI-013 | Overall meeting rate | All campaigns | total_meetings / total_replies × 100 |
+| ROI-014 | Overall ROI percentage | All campaigns | (total_revenue - total_cost) / total_cost × 100 |
+
+### ROI Prometheus Metrics
+
+| Test ID | What to Test | Expected Behavior |
+|---------|--------------|-------------------|
+| ROI-015 | EMAILS_SENT counter | Incremented when emails sent, labeled by campaign_id |
+| ROI-016 | MEETINGS_BOOKED counter | Incremented when meeting task created |
+| ROI-017 | INTERESTED_LEADS counter | Incremented when lead categorized as INTERESTED |
+| ROI-018 | CAMPAIGN_COST gauge | Set to current campaign cost |
+| ROI-019 | CAMPAIGN_POTENTIAL_REVENUE gauge | Set to meetings × deal_value |
+
+---
+
 ## Summary Table
 
 | Section | Tests | Status |
@@ -611,7 +675,9 @@ This document contains 192 hypothetical test scenarios organized by functional a
 | Maintenance Tasks | 4 | Ready |
 | Database Validation | 4 | Ready |
 | Apollo.io Functions | 3 | Ready |
-| **TOTAL** | **192** | **Ready** |
+| Campaign Management API | 10 | Ready |
+| ROI Dashboard & Metrics | 19 | Ready |
+| **TOTAL** | **221** | **Ready** |
 
 ---
 
@@ -629,3 +695,6 @@ This document contains 192 hypothetical test scenarios organized by functional a
 | Scoring | `app/services/scoring/service.py` |
 | Metrics | `app/core/metrics.py` |
 | Database | `app/db/session.py` |
+| Campaigns | `app/api/v1/campaigns.py`, `app/db/models/campaign.py` |
+| ROI Dashboard | `app/api/v1/dashboard.py` (get_campaign_roi endpoint) |
+| Schemas | `app/api/v1/schemas.py` (CampaignROI, ROIDashboard) |

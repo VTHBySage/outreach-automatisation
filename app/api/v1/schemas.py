@@ -277,13 +277,39 @@ class CampaignROI(BaseModel):
     """Campaign ROI metrics."""
 
     campaign_id: str
+    campaign_name: str
     emails_sent: int
     opens: int
     clicks: int
     replies: int
+    interested_leads: int
     meetings_booked: int
     conversion_rate: float  # replies / emails_sent
     meeting_rate: float  # meetings / replies
+    cost_per_email: float
+    total_cost: float
+    cost_per_lead: float | None  # total_cost / replies
+    cost_per_meeting: float | None  # total_cost / meetings
+    average_deal_value: float
+    potential_revenue: float  # meetings * average_deal_value
+    roi_percentage: float | None  # (potential_revenue - total_cost) / total_cost * 100
+
+
+class ROIDashboard(BaseModel):
+    """ROI Dashboard with aggregate and per-campaign metrics."""
+
+    total_emails_sent: int
+    total_cost: float
+    total_replies: int
+    total_interested: int
+    total_meetings: int
+    overall_reply_rate: float
+    overall_meeting_rate: float
+    overall_cost_per_lead: float | None
+    overall_cost_per_meeting: float | None
+    potential_revenue: float
+    overall_roi_percentage: float | None
+    campaigns: list[CampaignROI]
 
 
 class EmailMetricsDashboard(BaseModel):
@@ -309,3 +335,63 @@ class ErrorResponse(BaseModel):
 
     error: str
     detail: str | None = None
+
+
+# === Campaign Schemas ===
+
+class CampaignBase(BaseModel):
+    """Base campaign fields."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = None
+    status: Literal["active", "paused", "completed"] = "active"
+
+
+class CampaignCreate(CampaignBase):
+    """Create campaign request."""
+
+    smartlead_campaign_id: int | None = None
+    target_types: list[str] | None = None
+    target_industries: list[str] | None = None
+    exclude_types: list[str] | None = None
+    min_employees: int | None = None
+    max_employees: int | None = None
+    cost_per_email: Decimal | None = Field(default=Decimal("0.05"), ge=0)
+    average_deal_value: Decimal | None = Field(default=Decimal("5000.00"), ge=0)
+
+
+class CampaignROIUpdate(BaseModel):
+    """Update campaign ROI settings."""
+
+    cost_per_email: Decimal | None = Field(None, ge=0, description="Cost per email sent")
+    average_deal_value: Decimal | None = Field(None, ge=0, description="Average deal value")
+    total_emails_sent: int | None = Field(None, ge=0, description="Total emails sent")
+
+
+class CampaignResponse(CampaignBase):
+    """Campaign response schema."""
+
+    id: UUID
+    smartlead_campaign_id: int | None = None
+    target_types: list[str] | None = None
+    target_industries: list[str] | None = None
+    exclude_types: list[str] | None = None
+    min_employees: int | None = None
+    max_employees: int | None = None
+    min_confidence: Decimal
+    review_threshold: Decimal
+    cost_per_email: Decimal | None
+    average_deal_value: Decimal | None
+    total_emails_sent: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CampaignListResponse(BaseModel):
+    """Paginated campaign list response."""
+
+    items: list[CampaignResponse]
+    total: int
