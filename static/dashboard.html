@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Outreach Automation Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-500: #6b7280;
+            --gray-700: #374151;
+            --gray-900: #111827;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-900);
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        header {
+            background: white;
+            border-bottom: 1px solid var(--gray-200);
+            padding: 16px 24px;
+            margin-bottom: 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+            color: var(--gray-500);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        .status-dot.error {
+            background: var(--danger);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .stat-card .label {
+            font-size: 0.875rem;
+            color: var(--gray-500);
+            margin-bottom: 4px;
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--gray-900);
+        }
+
+        .stat-card .subtitle {
+            font-size: 0.75rem;
+            color: var(--gray-500);
+            margin-top: 4px;
+        }
+
+        .stat-card.highlight {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+        }
+
+        .stat-card.highlight .label,
+        .stat-card.highlight .value,
+        .stat-card.highlight .subtitle {
+            color: white;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--gray-100);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .card-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .card-body {
+            padding: 20px;
+        }
+
+        .sync-status-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+
+        .sync-item {
+            text-align: center;
+            padding: 12px;
+            background: var(--gray-50);
+            border-radius: 8px;
+        }
+
+        .sync-item .count {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .sync-item .label {
+            font-size: 0.75rem;
+            color: var(--gray-500);
+            text-transform: uppercase;
+        }
+
+        .sync-item.pending .count { color: var(--warning); }
+        .sync-item.synced .count { color: var(--success); }
+        .sync-item.failed .count { color: var(--danger); }
+
+        .activity-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .activity-item {
+            display: flex;
+            gap: 12px;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.875rem;
+            flex-shrink: 0;
+        }
+
+        .activity-icon.contact { background: #dbeafe; color: #2563eb; }
+        .activity-icon.task { background: #fef3c7; color: #d97706; }
+        .activity-icon.reply { background: #d1fae5; color: #059669; }
+
+        .activity-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .activity-title {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .activity-desc {
+            font-size: 0.875rem;
+            color: var(--gray-500);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .activity-time {
+            font-size: 0.75rem;
+            color: var(--gray-500);
+            white-space: nowrap;
+        }
+
+        .category-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background: var(--gray-100);
+            color: var(--gray-700);
+        }
+
+        .category-badge.interested { background: #d1fae5; color: #065f46; }
+        .category-badge.positive { background: #dbeafe; color: #1e40af; }
+        .category-badge.not_interested { background: #fee2e2; color: #991b1b; }
+        .category-badge.negative { background: #fef3c7; color: #92400e; }
+
+        .roi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .roi-item {
+            padding: 12px;
+            background: var(--gray-50);
+            border-radius: 8px;
+        }
+
+        .roi-item .label {
+            font-size: 0.75rem;
+            color: var(--gray-500);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .roi-item .value {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .roi-item .value.positive { color: var(--success); }
+        .roi-item .value.negative { color: var(--danger); }
+
+        .chart-container {
+            position: relative;
+            height: 200px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--gray-500);
+        }
+
+        .error-message {
+            background: #fef2f2;
+            color: #991b1b;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+
+        .refresh-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .refresh-btn:hover {
+            background: var(--primary-dark);
+        }
+
+        .priority-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.625rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .priority-badge.highest { background: #fee2e2; color: #991b1b; }
+        .priority-badge.high { background: #fef3c7; color: #92400e; }
+        .priority-badge.medium { background: #dbeafe; color: #1e40af; }
+        .priority-badge.low { background: var(--gray-100); color: var(--gray-700); }
+
+        @media (max-width: 768px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Outreach Automation Dashboard</h1>
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <div class="status-badge">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Connecting...</span>
+            </div>
+            <button class="refresh-btn" onclick="refreshAll()">
+                <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </header>
+
+    <div class="container">
+        <div id="errorContainer"></div>
+
+        <!-- Stats Cards -->
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card highlight">
+                <div class="label">Total Contacts</div>
+                <div class="value" id="totalContacts">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total Tasks</div>
+                <div class="value" id="totalTasks">-</div>
+                <div class="subtitle" id="tasksDueToday">- due today</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Total Replies</div>
+                <div class="value" id="totalReplies">-</div>
+                <div class="subtitle" id="repliesToday">- today</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Meetings Booked</div>
+                <div class="value" id="meetingsBooked">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Interested Leads</div>
+                <div class="value" id="interestedLeads">-</div>
+            </div>
+            <div class="stat-card">
+                <div class="label">Reply Rate</div>
+                <div class="value" id="replyRate">-</div>
+            </div>
+        </div>
+
+        <!-- Main Grid -->
+        <div class="grid-2">
+            <!-- Sync Status -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Sync Status</h2>
+                </div>
+                <div class="card-body">
+                    <h3 style="font-size: 0.875rem; color: var(--gray-500); margin-bottom: 12px;">Tasks</h3>
+                    <div class="sync-status-grid" id="taskSyncStatus">
+                        <div class="sync-item pending">
+                            <div class="count" id="pendingTasks">-</div>
+                            <div class="label">Pending</div>
+                        </div>
+                        <div class="sync-item synced">
+                            <div class="count" id="syncedTasks">-</div>
+                            <div class="label">Synced</div>
+                        </div>
+                        <div class="sync-item failed">
+                            <div class="count" id="failedTasks">-</div>
+                            <div class="label">Failed</div>
+                        </div>
+                    </div>
+                    <h3 style="font-size: 0.875rem; color: var(--gray-500); margin: 16px 0 12px;">Contacts</h3>
+                    <div class="sync-status-grid" style="grid-template-columns: repeat(2, 1fr);">
+                        <div class="sync-item synced">
+                            <div class="count" id="contactsSynced">-</div>
+                            <div class="label">With HubSpot ID</div>
+                        </div>
+                        <div class="sync-item pending">
+                            <div class="count" id="contactsUnsynced">-</div>
+                            <div class="label">Unsynced</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category Breakdown -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Contacts by Category</h2>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="categoryChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-2">
+            <!-- Recent Activity -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Recent Activity</h2>
+                </div>
+                <div class="card-body">
+                    <div class="activity-list" id="activityList">
+                        <div class="loading">Loading activity...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ROI Metrics -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Campaign ROI</h2>
+                </div>
+                <div class="card-body">
+                    <div class="roi-grid" id="roiGrid">
+                        <div class="roi-item">
+                            <div class="label">Total Emails Sent</div>
+                            <div class="value" id="emailsSent">-</div>
+                        </div>
+                        <div class="roi-item">
+                            <div class="label">Total Cost</div>
+                            <div class="value" id="totalCost">-</div>
+                        </div>
+                        <div class="roi-item">
+                            <div class="label">Cost per Lead</div>
+                            <div class="value" id="costPerLead">-</div>
+                        </div>
+                        <div class="roi-item">
+                            <div class="label">Cost per Meeting</div>
+                            <div class="value" id="costPerMeeting">-</div>
+                        </div>
+                        <div class="roi-item">
+                            <div class="label">Potential Revenue</div>
+                            <div class="value positive" id="potentialRevenue">-</div>
+                        </div>
+                        <div class="roi-item">
+                            <div class="label">Overall ROI</div>
+                            <div class="value" id="overallRoi">-</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tasks by Priority -->
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header">
+                <h2>Tasks by Priority</h2>
+            </div>
+            <div class="card-body">
+                <div class="chart-container" style="height: 150px;">
+                    <canvas id="priorityChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration - change this to your API URL
+        const API_BASE = window.location.origin;
+
+        let categoryChart = null;
+        let priorityChart = null;
+
+        // Utility functions
+        function formatNumber(num) {
+            if (num === null || num === undefined) return '-';
+            return new Intl.NumberFormat().format(num);
+        }
+
+        function formatCurrency(num) {
+            if (num === null || num === undefined) return '-';
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+        }
+
+        function formatPercent(num) {
+            if (num === null || num === undefined) return '-';
+            return num.toFixed(1) + '%';
+        }
+
+        function formatTimeAgo(dateStr) {
+            const date = new Date(dateStr);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+            const diffDays = Math.floor(diffMs / 86400000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            if (diffHours < 24) return `${diffHours}h ago`;
+            return `${diffDays}d ago`;
+        }
+
+        function getActivityIcon(type) {
+            const icons = {
+                contact: 'C',
+                task: 'T',
+                reply: 'R'
+            };
+            return icons[type] || '?';
+        }
+
+        function showError(message) {
+            const container = document.getElementById('errorContainer');
+            container.innerHTML = `<div class="error-message">${message}</div>`;
+            document.getElementById('statusDot').classList.add('error');
+            document.getElementById('statusText').textContent = 'Error';
+        }
+
+        function clearError() {
+            document.getElementById('errorContainer').innerHTML = '';
+            document.getElementById('statusDot').classList.remove('error');
+            document.getElementById('statusText').textContent = 'Connected';
+        }
+
+        // API calls
+        async function fetchStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/dashboard/stats`);
+                if (!response.ok) throw new Error('Failed to fetch stats');
+                const data = await response.json();
+
+                document.getElementById('totalContacts').textContent = formatNumber(data.total_contacts);
+                document.getElementById('totalTasks').textContent = formatNumber(data.total_tasks);
+                document.getElementById('tasksDueToday').textContent = `${data.tasks_due_today} due today`;
+                document.getElementById('totalReplies').textContent = formatNumber(data.total_replies);
+                document.getElementById('repliesToday').textContent = `${data.replies_today} today`;
+                document.getElementById('pendingTasks').textContent = formatNumber(data.pending_tasks);
+                document.getElementById('syncedTasks').textContent = formatNumber(data.synced_tasks);
+                document.getElementById('failedTasks').textContent = formatNumber(data.failed_tasks);
+
+                // Update category chart
+                updateCategoryChart(data.contacts_by_category);
+
+                // Update priority chart
+                updatePriorityChart(data.tasks_by_priority);
+
+                return data;
+            } catch (error) {
+                console.error('Error fetching stats:', error);
+                throw error;
+            }
+        }
+
+        async function fetchSyncStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/dashboard/sync-status`);
+                if (!response.ok) throw new Error('Failed to fetch sync status');
+                const data = await response.json();
+
+                document.getElementById('contactsSynced').textContent = formatNumber(data.contacts.synced);
+                document.getElementById('contactsUnsynced').textContent = formatNumber(data.contacts.unsynced);
+
+                return data;
+            } catch (error) {
+                console.error('Error fetching sync status:', error);
+                throw error;
+            }
+        }
+
+        async function fetchRecentActivity() {
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/dashboard/recent?limit=20`);
+                if (!response.ok) throw new Error('Failed to fetch activity');
+                const data = await response.json();
+
+                const container = document.getElementById('activityList');
+
+                if (!data.items || data.items.length === 0) {
+                    container.innerHTML = '<div class="loading">No recent activity</div>';
+                    return;
+                }
+
+                container.innerHTML = data.items.map(item => `
+                    <div class="activity-item">
+                        <div class="activity-icon ${item.type}">${getActivityIcon(item.type)}</div>
+                        <div class="activity-content">
+                            <div class="activity-title">${escapeHtml(item.title)}</div>
+                            <div class="activity-desc">
+                                ${escapeHtml(item.description)}
+                                ${item.category ? `<span class="category-badge ${item.category.toLowerCase().replace(' ', '_')}">${item.category}</span>` : ''}
+                                ${item.priority ? `<span class="priority-badge ${item.priority}">${item.priority}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="activity-time">${formatTimeAgo(item.timestamp)}</div>
+                    </div>
+                `).join('');
+
+                return data;
+            } catch (error) {
+                console.error('Error fetching activity:', error);
+                document.getElementById('activityList').innerHTML = '<div class="loading">Failed to load activity</div>';
+                throw error;
+            }
+        }
+
+        async function fetchROI() {
+            try {
+                const response = await fetch(`${API_BASE}/api/v1/dashboard/roi`);
+                if (!response.ok) throw new Error('Failed to fetch ROI');
+                const data = await response.json();
+
+                document.getElementById('emailsSent').textContent = formatNumber(data.total_emails_sent);
+                document.getElementById('totalCost').textContent = formatCurrency(data.total_cost);
+                document.getElementById('costPerLead').textContent = data.overall_cost_per_lead ? formatCurrency(data.overall_cost_per_lead) : '-';
+                document.getElementById('costPerMeeting').textContent = data.overall_cost_per_meeting ? formatCurrency(data.overall_cost_per_meeting) : '-';
+                document.getElementById('potentialRevenue').textContent = formatCurrency(data.potential_revenue);
+                document.getElementById('meetingsBooked').textContent = formatNumber(data.total_meetings);
+                document.getElementById('interestedLeads').textContent = formatNumber(data.total_interested);
+                document.getElementById('replyRate').textContent = formatPercent(data.overall_reply_rate);
+
+                const roiElement = document.getElementById('overallRoi');
+                if (data.overall_roi_percentage !== null) {
+                    roiElement.textContent = formatPercent(data.overall_roi_percentage);
+                    roiElement.className = 'value ' + (data.overall_roi_percentage >= 0 ? 'positive' : 'negative');
+                } else {
+                    roiElement.textContent = '-';
+                }
+
+                return data;
+            } catch (error) {
+                console.error('Error fetching ROI:', error);
+                throw error;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function updateCategoryChart(categories) {
+            const ctx = document.getElementById('categoryChart').getContext('2d');
+
+            if (categoryChart) {
+                categoryChart.destroy();
+            }
+
+            const colors = {
+                'interested': '#10b981',
+                'positive_signals': '#3b82f6',
+                'not_interested': '#ef4444',
+                'negative_signals': '#f59e0b',
+                'automate_reply': '#6b7280'
+            };
+
+            const labels = categories.map(c => c.category || 'Unknown');
+            const data = categories.map(c => c.count);
+            const bgColors = labels.map(l => colors[l.toLowerCase().replace(' ', '_')] || '#9ca3af');
+
+            categoryChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: bgColors,
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 12,
+                                padding: 12
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updatePriorityChart(priorities) {
+            const ctx = document.getElementById('priorityChart').getContext('2d');
+
+            if (priorityChart) {
+                priorityChart.destroy();
+            }
+
+            const priorityColors = {
+                'highest': '#ef4444',
+                'high': '#f59e0b',
+                'medium': '#3b82f6',
+                'low': '#9ca3af'
+            };
+
+            const labels = priorities.map(p => p.priority);
+            const data = priorities.map(p => p.count);
+            const bgColors = labels.map(l => priorityColors[l.toLowerCase()] || '#9ca3af');
+
+            priorityChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels.map(l => l.charAt(0).toUpperCase() + l.slice(1)),
+                    datasets: [{
+                        label: 'Tasks',
+                        data: data,
+                        backgroundColor: bgColors,
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function refreshAll() {
+            clearError();
+            document.getElementById('statusText').textContent = 'Refreshing...';
+
+            try {
+                await Promise.all([
+                    fetchStats(),
+                    fetchSyncStatus(),
+                    fetchRecentActivity(),
+                    fetchROI()
+                ]);
+                clearError();
+            } catch (error) {
+                showError('Failed to load dashboard data. Make sure the API is running.');
+            }
+        }
+
+        // Initial load
+        refreshAll();
+
+        // Auto-refresh every 30 seconds
+        setInterval(refreshAll, 30000);
+    </script>
+</body>
+</html>

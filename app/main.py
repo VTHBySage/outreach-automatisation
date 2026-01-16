@@ -1,9 +1,12 @@
 """FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.config import settings
@@ -73,6 +76,16 @@ def create_app() -> FastAPI:
 
     # Include routers
     app.include_router(api_router)
+
+    # Serve static dashboard UI
+    static_dir = Path(__file__).parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+        @app.get("/dashboard", include_in_schema=False)
+        async def dashboard():
+            """Serve the dashboard UI."""
+            return FileResponse(static_dir / "dashboard.html")
 
     return app
 
